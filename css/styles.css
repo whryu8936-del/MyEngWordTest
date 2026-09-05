@@ -445,6 +445,28 @@ th {
   font-variant-numeric: tabular-nums;
 }
 
+.col-manage {
+  white-space: nowrap;
+}
+
+.manage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.word-check {
+  width: 18px;
+  height: 18px;
+  margin: 3px 0 0;
+  padding: 0;
+  flex: none;
+  border-radius: 4px;
+  accent-color: var(--navy);
+  cursor: pointer;
+}
+
 .pos-tag {
   display: inline-block;
   padding: 3px 10px;
@@ -464,6 +486,7 @@ th {
 
 .actions {
   display: flex;
+  align-items: center;
   gap: 8px;
 }
 

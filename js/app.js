@@ -55,6 +55,7 @@ let wordPage = 1;
 let wordPageSize = loadPageSize();
 let wordGroup = DEFAULT_WORD_GROUP;
 let settings = loadSettings();
+let selectedWordIds = new Set();
 
 document.getElementById("homeBtn").addEventListener("click", () => {
   if (quiz && !confirm("진행 중인 시험을 종료하고 메인 화면으로 돌아갈까요?")) return;
@@ -912,6 +913,7 @@ function renderResult(record, justFinished) {
 }
 
 function renderWords() {
+  selectedWordIds = new Set();
   updateHeader(`단어 관리 · ${wordGroup} · ${wordsInGroup(wordGroup).length}개`);
   app.innerHTML = `
     <div class="toolbar">
@@ -953,6 +955,7 @@ function renderWords() {
   document.getElementById("wordGroupSelect").addEventListener("change", (event) => {
     wordGroup = event.target.value;
     wordPage = 1;
+    selectedWordIds = new Set();
     drawWordTable(document.getElementById("wordSearch").value);
   });
 
@@ -1032,7 +1035,14 @@ function drawWordTable(keyword) {
             <th>품사</th>
             <th>뜻</th>
             <th>정답율</th>
-            <th>관리</th>
+            <th class="col-manage">
+              <div class="manage-head">
+                <span>관리</span>
+                <button type="button" class="icon-btn" id="bulkDeleteBtn" ${selectedWordIds.size === 0 ? "disabled" : ""}>
+                  선택 삭제${selectedWordIds.size ? ` (${selectedWordIds.size})` : ""}
+                </button>
+              </div>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -1049,6 +1059,13 @@ function drawWordTable(keyword) {
                     <div class="actions">
                       <button class="icon-btn" data-edit="${word.id}">변경</button>
                       <button class="icon-btn" data-delete="${word.id}">삭제</button>
+                      <input
+                        class="word-check"
+                        type="checkbox"
+                        data-select="${word.id}"
+                        aria-label="${escapeHtml(word.english)} 선택"
+                        ${selectedWordIds.has(word.id) ? "checked" : ""}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -1073,6 +1090,14 @@ function drawWordTable(keyword) {
   target.querySelectorAll("[data-delete]").forEach((button) => {
     button.addEventListener("click", () => deleteWord(button.dataset.delete));
   });
+  target.querySelectorAll("[data-select]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedWordIds.add(checkbox.dataset.select);
+      else selectedWordIds.delete(checkbox.dataset.select);
+      updateBulkDeleteButton();
+    });
+  });
+  document.getElementById("bulkDeleteBtn")?.addEventListener("click", () => deleteSelectedWords(keyword));
   target.querySelectorAll("[data-page]").forEach((button) => {
     button.addEventListener("click", () => {
       if (button.dataset.page === "first") wordPage = 1;
@@ -1339,9 +1364,30 @@ async function deleteWord(id) {
   const word = words.find((item) => item.id === id);
   if (!word) return;
   if (!confirm(`'${word.english}' 단어를 삭제할까요?`)) return;
+  selectedWordIds.delete(id);
   words = words.filter((item) => item.id !== id);
   await persistWords();
   drawWordTable(document.getElementById("wordSearch").value);
+}
+
+function updateBulkDeleteButton() {
+  const button = document.getElementById("bulkDeleteBtn");
+  if (!button) return;
+  button.disabled = selectedWordIds.size === 0;
+  button.textContent = selectedWordIds.size ? `선택 삭제 (${selectedWordIds.size})` : "선택 삭제";
+}
+
+async function deleteSelectedWords(keyword = "") {
+  const ids = [...selectedWordIds];
+  if (!ids.length) {
+    alert("삭제할 단어를 선택해 주세요.");
+    return;
+  }
+  if (!confirm(`선택한 단어 ${ids.length}개를 삭제할까요?`)) return;
+  words = words.filter((item) => !selectedWordIds.has(item.id));
+  selectedWordIds = new Set();
+  await persistWords();
+  drawWordTable(keyword);
 }
 
 function renderRecords() {
