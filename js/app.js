@@ -20,14 +20,33 @@ const DEFAULT_PAGE_SIZE = 20;
 const WORD_GROUPS = ["Intensive Reading Book 단어", "교과서 영어 단어", "VOCA 영어 단어"];
 const DEFAULT_WORD_GROUP = WORD_GROUPS[0];
 
+const firebaseConfig = {
+  apiKey: "AIzaSyAsWSpkljhwHSURAcgWna_H3gSCDyGF01Y",
+  authDomain: "myengwordtest.firebaseapp.com",
+  databaseURL: "https://myengwordtest-default-rtdb.firebaseio.com",
+  projectId: "myengwordtest",
+  storageBucket: "myengwordtest.firebasestorage.app",
+  messagingSenderId: "333381661944",
+  appId: "1:333381661944:web:7cd334e5c8d41d97a5770d",
+  measurementId: "G-B0FJRBP8S7",
+};
+
+const DB_PATHS = {
+  words: "word_list",
+  exams: "exam_list",
+  settings: "conf-env",
+};
+
 const app = document.getElementById("app");
 const headerMeta = document.getElementById("headerMeta");
 const modalBackdrop = document.getElementById("modalBackdrop");
 const modalTitle = document.getElementById("modalTitle");
 const modalBody = document.getElementById("modalBody");
 
-let words = loadWords();
-let records = loadRecords();
+let firebaseDb = null;
+let firebaseReady = false;
+let words = [];
+let records = [];
 let partsOfSpeech = loadPartsOfSpeech();
 let quiz = null;
 let quizTimerId = null;
@@ -55,10 +74,224 @@ document.addEventListener("click", (event) => {
   }
 });
 
-renderHome();
+initApp();
 
-function loadWords() {
-  return [];
+function initFirebase() {
+  if (!window.firebase) throw new Error("Firebase SDK를 불러오지 못했습니다.");
+  if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+  firebaseDb = firebase.database();
+}
+
+function toList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter((item) => item != null);
+  return Object.keys(value)
+    .sort((a, b) => Number(a) - Number(b))
+    .map((key) => value[key])
+    .filter((item) => item != null);
+}
+
+function splitMeanings(meaning) {
+  const parts = String(meaning || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return {
+    kor_mean1: parts[0] || "",
+    kor_mean2: parts.slice(1).join(", "),
+  };
+}
+
+function joinMeanings(mean1, mean2) {
+  return [mean1, mean2]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function wordRate(word) {
+  const count = Number(word.count) || 0;
+  const ansCount = Number(word.ansCount) || 0;
+  return count === 0 ? 0 : Math.round((ansCount / count) * 100);
+}
+
+function toFirebaseWord(word) {
+  const { kor_mean1, kor_mean2 } = splitMeanings(word.meaning);
+  return {
+    Group: word.group,
+    eng_word: word.english,
+    word_class: word.pos || "명사",
+    kor_mean1,
+    kor_mean2,
+    date: word.createdAt || Date.now(),
+    rate: wordRate(word),
+    count: Number(word.count) || 0,
+    ans_count: Number(word.ansCount) || 0,
+  };
+}
+
+function fromFirebaseWord(item) {
+  return {
+    id: crypto.randomUUID(),
+    english: String(item.eng_word || "").trim(),
+    meaning: joinMeanings(item.kor_mean1, item.kor_mean2),
+    pos: item.word_class || "명사",
+    group: WORD_GROUPS.includes(item.Group) ? item.Group : DEFAULT_WORD_GROUP,
+    createdAt: Number(item.date) || Date.now(),
+    rate: Number(item.rate) || 0,
+    count: Number(item.count) || 0,
+    ansCount: Number(item.ans_count) || 0,
+  };
+}
+
+function isStoredCorrect(value) {
+  return value === true || value === "정답" || value === "correct";
+}
+
+function toFirebaseExam(record) {
+  return {
+    test_date: record.date,
+    test_duration: Number(record.duration) || 0,
+    word_group: record.group || DEFAULT_WORD_GROUP,
+    test_items: (record.answers || []).map((item) => ({
+      eng_word: item.english,
+      word_class: item.pos || "",
+      korean_mean: item.meaning,
+      correct: item.correct ? "정답" : "오답",
+      answer: item.userAnswer || "",
+    })),
+  };
+}
+
+function fromFirebaseExam(item) {
+  const answers = toList(item.test_items).map((entry) => ({
+    english: entry.eng_word || "",
+    pos: entry.word_class || "",
+    meaning: entry.korean_mean || "",
+    userAnswer: entry.answer || "",
+    correct: isStoredCorrect(entry.correct),
+  }));
+  return {
+    id: crypto.randomUUID(),
+    date: Number(item.test_date) || Date.now(),
+    duration: Number(item.test_duration) || 0,
+    total: answers.length,
+    correct: answers.filter((answer) => answer.correct).length,
+    group: WORD_GROUPS.includes(item.word_group) ? item.word_group : DEFAULT_WORD_GROUP,
+    answers,
+  };
+}
+
+function toFirebaseSettings(current) {
+  return {
+    test_item_count: current.quizSize,
+    test_time_duration: current.quizMinutes,
+    test_type: current.quizFormat,
+  };
+}
+
+function fromFirebaseSettings(raw) {
+  const defaults = {
+    quizSize: DEFAULT_QUIZ_SIZE,
+    quizMinutes: DEFAULT_QUIZ_MINUTES,
+    quizFormat: DEFAULT_QUIZ_FORMAT,
+  };
+  if (!raw) return defaults;
+  const quizSize = QUIZ_SIZE_OPTIONS.includes(Number(raw.test_item_count))
+    ? Number(raw.test_item_count)
+    : defaults.quizSize;
+  const minutes = Number(raw.test_time_duration);
+  const quizMinutes =
+    Number.isInteger(minutes) && minutes >= MIN_QUIZ_MINUTES && minutes <= MAX_QUIZ_MINUTES
+      ? minutes
+      : defaults.quizMinutes;
+  const quizFormat = QUIZ_FORMAT_OPTIONS.includes(raw.test_type) ? raw.test_type : defaults.quizFormat;
+  return { quizSize, quizMinutes, quizFormat };
+}
+
+async function dbGet(path) {
+  const snap = await firebaseDb.ref(path).get();
+  return snap.exists() ? snap.val() : null;
+}
+
+async function dbSet(path, value) {
+  await firebaseDb.ref(path).set(value);
+}
+
+async function saveWordList() {
+  if (!firebaseReady) return;
+  await dbSet(DB_PATHS.words, words.map(toFirebaseWord));
+}
+
+async function saveExamList() {
+  if (!firebaseReady) return;
+  await dbSet(DB_PATHS.exams, records.map(toFirebaseExam));
+}
+
+async function saveSettingsToFirebase() {
+  if (!firebaseReady) return;
+  await dbSet(DB_PATHS.settings, toFirebaseSettings(settings));
+}
+
+async function persistWords() {
+  try {
+    await saveWordList();
+  } catch (error) {
+    console.error(error);
+    alert("단어 목록을 Firebase에 저장하지 못했습니다.");
+  }
+}
+
+async function persistExamsAndWords() {
+  try {
+    await Promise.all([saveWordList(), saveExamList()]);
+  } catch (error) {
+    console.error(error);
+    alert("시험 기록을 Firebase에 저장하지 못했습니다.");
+  }
+}
+
+function collectPartsOfSpeech() {
+  for (const word of words) {
+    if (word.pos) resolvePos(word.pos);
+  }
+}
+
+function renderLoading(message) {
+  updateHeader(message);
+  app.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
+}
+
+async function loadFromFirebase() {
+  const [rawWords, rawExams, rawSettings] = await Promise.all([
+    dbGet(DB_PATHS.words),
+    dbGet(DB_PATHS.exams),
+    dbGet(DB_PATHS.settings),
+  ]);
+  words = toList(rawWords)
+    .map(fromFirebaseWord)
+    .filter((word) => word.english);
+  records = toList(rawExams).map(fromFirebaseExam);
+  settings = fromFirebaseSettings(rawSettings);
+  collectPartsOfSpeech();
+  if (!rawSettings) await saveSettingsToFirebase();
+}
+
+async function initApp() {
+  renderLoading("Firebase에서 데이터를 불러오는 중입니다.");
+  try {
+    initFirebase();
+    firebaseReady = true;
+    await loadFromFirebase();
+  } catch (error) {
+    console.error(error);
+    firebaseReady = false;
+    words = [];
+    records = [];
+    settings = loadSettings();
+    alert("Firebase 데이터를 불러오지 못했습니다. 빈 상태로 시작합니다.");
+  }
+  renderHome();
 }
 
 function wordsInGroup(group) {
@@ -83,10 +316,6 @@ function loadPageSize() {
   return DEFAULT_PAGE_SIZE;
 }
 
-function loadRecords() {
-  return [];
-}
-
 function createWord(english, meaning, pos, group) {
   return {
     id: crypto.randomUUID(),
@@ -95,6 +324,9 @@ function createWord(english, meaning, pos, group) {
     pos: pos || "명사",
     group: WORD_GROUPS.includes(group) ? group : DEFAULT_WORD_GROUP,
     createdAt: Date.now(),
+    rate: 0,
+    count: 0,
+    ansCount: 0,
   };
 }
 
@@ -122,30 +354,10 @@ function posOptions(selected) {
   ).join("");
 }
 
-function buildWordStats() {
-  const byId = new Map();
-  const byEnglish = new Map();
-
-  for (const record of records) {
-    for (const answer of record.answers || []) {
-      const target = answer.wordId ? byId : byEnglish;
-      const key = answer.wordId || answer.english.toLowerCase();
-      const current = target.get(key) || { asked: 0, correct: 0 };
-      current.asked += 1;
-      if (answer.correct) current.correct += 1;
-      target.set(key, current);
-    }
-  }
-
-  return { byId, byEnglish };
-}
-
-function getWordAccuracy(word, stats) {
-  const fromId = stats.byId.get(word.id) || { asked: 0, correct: 0 };
-  const fromEnglish = stats.byEnglish.get(word.english.toLowerCase()) || { asked: 0, correct: 0 };
+function getWordAccuracy(word) {
   return {
-    asked: fromId.asked + fromEnglish.asked,
-    correct: fromId.correct + fromEnglish.correct,
+    asked: Number(word.count) || 0,
+    correct: Number(word.ansCount) || 0,
   };
 }
 
@@ -153,15 +365,15 @@ function currentSortLabel() {
   return SORT_OPTIONS.find((option) => option.id === wordSort)?.label || "등록일순";
 }
 
-function sortWords(list, stats) {
+function sortWords(list) {
   return [...list].sort((a, b) => {
     if (wordSort === "alpha") {
       return a.english.localeCompare(b.english, "en", { sensitivity: "base" });
     }
 
     if (wordSort === "rate") {
-      const aAcc = getWordAccuracy(a, stats);
-      const bAcc = getWordAccuracy(b, stats);
+      const aAcc = getWordAccuracy(a);
+      const bAcc = getWordAccuracy(b);
       const aRate = aAcc.asked === 0 ? -1 : aAcc.correct / aAcc.asked;
       const bRate = bAcc.asked === 0 ? -1 : bAcc.correct / bAcc.asked;
       if (bRate !== aRate) return bRate - aRate;
@@ -178,8 +390,8 @@ function sortWords(list, stats) {
   });
 }
 
-function formatAccuracy(word, stats) {
-  const { asked, correct } = getWordAccuracy(word, stats);
+function formatAccuracy(word) {
+  const { asked, correct } = getWordAccuracy(word);
   if (asked === 0) return `<span class="rate-empty">미출제</span>`;
   const percent = Math.round((correct / asked) * 100);
   return `<span class="rate">${percent}% <span class="rate-frac">(${correct}/${asked})</span></span>`;
@@ -346,7 +558,7 @@ function renderSettings() {
   `;
 
   document.getElementById("backHome").addEventListener("click", renderHome);
-  document.getElementById("settingsForm").addEventListener("submit", (event) => {
+  document.getElementById("settingsForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const quizSize = Number(event.target.quizSize.value);
     const quizMinutes = Number(event.target.quizMinutes.value);
@@ -364,8 +576,14 @@ function renderSettings() {
       return;
     }
     settings = { quizSize, quizMinutes, quizFormat };
-    alert("환경 설정을 저장했습니다.");
-    renderHome();
+    try {
+      await saveSettingsToFirebase();
+      alert("환경 설정을 저장했습니다.");
+      renderHome();
+    } catch (error) {
+      console.error(error);
+      alert("환경 설정을 Firebase에 저장하지 못했습니다.");
+    }
   });
 }
 
@@ -459,6 +677,7 @@ function expireQuiz() {
     quiz.answers.push({
       wordId: current.id,
       english: current.english,
+      pos: current.pos || "",
       meaning: current.meaning,
       userAnswer: "시간 초과",
       correct: false,
@@ -575,6 +794,7 @@ function submitAnswer(userAnswer, unknown = false) {
   quiz.answers.push({
     wordId: current.id,
     english: current.english,
+    pos: current.pos || "",
     meaning: current.meaning,
     userAnswer: answer,
     correct,
@@ -589,20 +809,39 @@ function submitAnswer(userAnswer, unknown = false) {
   finishQuiz();
 }
 
-function finishQuiz() {
-  const total = quiz.answers.length;
-  const correct = quiz.answers.filter((item) => item.correct).length;
+function applyQuizStats(answers, group) {
+  for (const answer of answers) {
+    const word =
+      words.find((item) => item.id === answer.wordId) ||
+      words.find(
+        (item) =>
+          item.group === group && item.english.toLowerCase() === String(answer.english || "").toLowerCase(),
+      );
+    if (!word) continue;
+    word.count = (Number(word.count) || 0) + 1;
+    if (answer.correct) word.ansCount = (Number(word.ansCount) || 0) + 1;
+    word.rate = wordRate(word);
+  }
+}
+
+async function finishQuiz() {
+  const currentQuiz = quiz;
+  const total = currentQuiz.answers.length;
+  const correct = currentQuiz.answers.filter((item) => item.correct).length;
   const record = {
     id: crypto.randomUUID(),
     date: Date.now(),
+    duration: Math.max(0, Math.floor((Date.now() - currentQuiz.startedAt) / 1000)),
     total,
     correct,
-    group: quiz.group || DEFAULT_WORD_GROUP,
-    answers: quiz.answers,
+    group: currentQuiz.group || DEFAULT_WORD_GROUP,
+    answers: currentQuiz.answers,
   };
+  applyQuizStats(currentQuiz.answers, currentQuiz.group);
   records.unshift(record);
   stopQuizTimer();
   quiz = null;
+  await persistExamsAndWords();
   renderResult(record, true);
 }
 
@@ -629,6 +868,7 @@ function renderResult(record, justFinished) {
       <div class="result-card">
         <p class="lede">${formatDate(record.date)}에 치른 시험입니다. 입력한 뜻과 원래 뜻을 비교해 보세요.</p>
         <p>단어 그룹 · ${escapeHtml(record.group || DEFAULT_WORD_GROUP)}</p>
+        <p>소요 시간 · ${formatElapsed((Number(record.duration) || 0) * 1000)}</p>
         <p>정답 ${record.correct}개 · 오답 ${record.total - record.correct}개</p>
       </div>
     </div>
@@ -760,7 +1000,6 @@ function drawWordTable(keyword) {
   const grouped = wordsInGroup(wordGroup);
   updateHeader(`단어 관리 · ${wordGroup} · ${grouped.length}개`);
   const query = keyword.trim().toLowerCase();
-  const stats = buildWordStats();
   const filtered = sortWords(
     grouped.filter(
       (word) =>
@@ -768,7 +1007,6 @@ function drawWordTable(keyword) {
         word.meaning.toLowerCase().includes(query) ||
         (word.pos || "").includes(query),
     ),
-    stats,
   );
 
   const target = document.getElementById("wordTable");
@@ -806,7 +1044,7 @@ function drawWordTable(keyword) {
                   <td>${escapeHtml(word.english)}</td>
                   <td><span class="pos-tag">${escapeHtml(word.pos || "-")}</span></td>
                   <td>${escapeHtml(word.meaning)}</td>
-                  <td class="col-rate">${formatAccuracy(word, stats)}</td>
+                  <td class="col-rate">${formatAccuracy(word)}</td>
                   <td>
                     <div class="actions">
                       <button class="icon-btn" data-edit="${word.id}">변경</button>
@@ -880,7 +1118,7 @@ function openAddModal() {
     document.getElementById("importFileInput").click();
   });
   document.getElementById("importFileInput").addEventListener("change", handleWordFile);
-  document.getElementById("addWordForm").addEventListener("submit", (event) => {
+  document.getElementById("addWordForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const english = event.target.english.value.trim();
     const meaning = event.target.meaning.value.trim();
@@ -890,6 +1128,7 @@ function openAddModal() {
       return;
     }
     words.unshift(createWord(english, meaning, pos, wordGroup));
+    await persistWords();
     closeModal();
     drawWordTable(document.getElementById("wordSearch").value);
   });
@@ -1016,7 +1255,7 @@ function formatMeanings(text) {
     .join(", ");
 }
 
-function applyImportedWords(imported) {
+async function applyImportedWords(imported) {
   const addedWords = [];
   let skipped = 0;
 
@@ -1036,6 +1275,7 @@ function applyImportedWords(imported) {
   }
 
   words = [...addedWords, ...words];
+  await persistWords();
   wordPage = 1;
   closeModal();
   drawWordTable(document.getElementById("wordSearch").value);
@@ -1071,7 +1311,7 @@ function openEditModal(id) {
   );
 
   document.getElementById("cancelEdit").addEventListener("click", closeModal);
-  document.getElementById("editWordForm").addEventListener("submit", (event) => {
+  document.getElementById("editWordForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const english = event.target.english.value.trim();
     const meaning = event.target.meaning.value.trim();
@@ -1089,16 +1329,18 @@ function openEditModal(id) {
     word.english = english;
     word.meaning = meaning;
     word.pos = pos;
+    await persistWords();
     closeModal();
     drawWordTable(document.getElementById("wordSearch").value);
   });
 }
 
-function deleteWord(id) {
+async function deleteWord(id) {
   const word = words.find((item) => item.id === id);
   if (!word) return;
   if (!confirm(`'${word.english}' 단어를 삭제할까요?`)) return;
   words = words.filter((item) => item.id !== id);
+  await persistWords();
   drawWordTable(document.getElementById("wordSearch").value);
 }
 
@@ -1129,7 +1371,7 @@ function renderRecords() {
             <article class="history-card">
               <div>
                 <h3>${percent}점 · ${record.correct}/${record.total}</h3>
-                <p>${formatDate(record.date)} · ${escapeHtml(record.group || DEFAULT_WORD_GROUP)} · ${record.total}문항</p>
+                <p>${formatDate(record.date)} · ${escapeHtml(record.group || DEFAULT_WORD_GROUP)} · ${record.total}문항 · ${formatElapsed((Number(record.duration) || 0) * 1000)}</p>
               </div>
               <button class="btn secondary" data-record="${record.id}">상세 보기</button>
             </article>
