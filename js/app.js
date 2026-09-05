@@ -1,11 +1,3 @@
-const STORAGE_KEYS = {
-  words: "vocab-words",
-  records: "vocab-records",
-  pageSize: "vocab-page-size",
-  partsOfSpeech: "vocab-pos",
-  settings: "vocab-settings",
-};
-
 const QUIZ_SIZE_OPTIONS = [10, 20, 30, 40, 50];
 const QUIZ_FORMAT_OPTIONS = ["주관식", "객관식"];
 const DEFAULT_QUIZ_SIZE = 30;
@@ -27,51 +19,6 @@ const DEFAULT_PAGE_SIZE = 20;
 
 const WORD_GROUPS = ["Intensive Reading Book 단어", "교과서 영어 단어", "VOCA 영어 단어"];
 const DEFAULT_WORD_GROUP = WORD_GROUPS[0];
-
-const DEFAULT_WORDS = [
-  ["abandon", "버리다, 포기하다", "동사"],
-  ["ability", "능력", "명사"],
-  ["abundant", "풍부한", "형용사"],
-  ["achieve", "성취하다", "동사"],
-  ["acquire", "획득하다", "동사"],
-  ["adapt", "적응하다", "동사"],
-  ["adequate", "충분한, 적절한", "형용사"],
-  ["advantage", "이점, 유리함", "명사"],
-  ["ancient", "고대의", "형용사"],
-  ["anxious", "불안한", "형용사"],
-  ["apparent", "명백한", "형용사"],
-  ["approach", "접근하다, 접근법", "동사"],
-  ["benefit", "이익, 혜택", "명사"],
-  ["capable", "유능한", "형용사"],
-  ["circumstance", "상황", "명사"],
-  ["complex", "복잡한", "형용사"],
-  ["conclude", "결론짓다", "동사"],
-  ["consider", "고려하다", "동사"],
-  ["contribute", "기여하다", "동사"],
-  ["decline", "감소하다, 거절하다", "동사"],
-  ["demonstrate", "보여주다, 입증하다", "동사"],
-  ["distinct", "뚜렷한, 구별되는", "형용사"],
-  ["efficient", "효율적인", "형용사"],
-  ["emphasize", "강조하다", "동사"],
-  ["establish", "설립하다, 확립하다", "동사"],
-  ["evaluate", "평가하다", "동사"],
-  ["evidence", "증거", "명사"],
-  ["expand", "확장하다", "동사"],
-  ["frequent", "빈번한", "형용사"],
-  ["generate", "생성하다", "동사"],
-  ["identify", "확인하다, 식별하다", "동사"],
-  ["indicate", "나타내다", "동사"],
-  ["maintain", "유지하다", "동사"],
-  ["obtain", "얻다", "동사"],
-  ["occur", "발생하다", "동사"],
-  ["precise", "정확한", "형용사"],
-  ["require", "요구하다", "동사"],
-  ["significant", "중요한, 상당한", "형용사"],
-  ["sufficient", "충분한", "형용사"],
-  ["various", "다양한", "형용사"],
-];
-
-const DEFAULT_POS_BY_ENGLISH = new Map(DEFAULT_WORDS.map(([english, , pos]) => [english.toLowerCase(), pos]));
 
 const app = document.getElementById("app");
 const headerMeta = document.getElementById("headerMeta");
@@ -111,32 +58,7 @@ document.addEventListener("click", (event) => {
 renderHome();
 
 function loadWords() {
-  const saved = localStorage.getItem(STORAGE_KEYS.words);
-  if (saved) return migrateWords(JSON.parse(saved));
-  const seeded = DEFAULT_WORDS.map(([english, meaning, pos]) => createWord(english, meaning, pos, DEFAULT_WORD_GROUP));
-  localStorage.setItem(STORAGE_KEYS.words, JSON.stringify(seeded));
-  return seeded;
-}
-
-function migrateWords(list) {
-  let changed = false;
-  const migrated = list.map((word) => {
-    let next = word;
-    if (!word.pos) {
-      changed = true;
-      next = {
-        ...next,
-        pos: DEFAULT_POS_BY_ENGLISH.get(word.english.toLowerCase()) || "명사",
-      };
-    }
-    if (!WORD_GROUPS.includes(word.group)) {
-      changed = true;
-      next = { ...next, group: DEFAULT_WORD_GROUP };
-    }
-    return next;
-  });
-  if (changed) localStorage.setItem(STORAGE_KEYS.words, JSON.stringify(migrated));
-  return migrated;
+  return [];
 }
 
 function wordsInGroup(group) {
@@ -150,53 +72,19 @@ function groupOptions(selected) {
 }
 
 function loadSettings() {
-  const defaults = {
+  return {
     quizSize: DEFAULT_QUIZ_SIZE,
     quizMinutes: DEFAULT_QUIZ_MINUTES,
     quizFormat: DEFAULT_QUIZ_FORMAT,
   };
-  const saved = localStorage.getItem(STORAGE_KEYS.settings);
-  if (!saved) return defaults;
-  try {
-    const parsed = JSON.parse(saved);
-    const quizSize = QUIZ_SIZE_OPTIONS.includes(parsed.quizSize) ? parsed.quizSize : defaults.quizSize;
-    const minutes = Number(parsed.quizMinutes);
-    const quizMinutes =
-      Number.isInteger(minutes) && minutes >= MIN_QUIZ_MINUTES && minutes <= MAX_QUIZ_MINUTES
-        ? minutes
-        : defaults.quizMinutes;
-    const quizFormat = QUIZ_FORMAT_OPTIONS.includes(parsed.quizFormat) ? parsed.quizFormat : defaults.quizFormat;
-    return { quizSize, quizMinutes, quizFormat };
-  } catch {
-    return defaults;
-  }
-}
-
-function saveSettings() {
-  localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
 }
 
 function loadPageSize() {
-  const saved = Number(localStorage.getItem(STORAGE_KEYS.pageSize));
-  if (Number.isInteger(saved) && saved >= 1 && saved <= 200) return saved;
   return DEFAULT_PAGE_SIZE;
 }
 
-function savePageSize() {
-  localStorage.setItem(STORAGE_KEYS.pageSize, String(wordPageSize));
-}
-
 function loadRecords() {
-  const saved = localStorage.getItem(STORAGE_KEYS.records);
-  return saved ? JSON.parse(saved) : [];
-}
-
-function saveWords() {
-  localStorage.setItem(STORAGE_KEYS.words, JSON.stringify(words));
-}
-
-function saveRecords() {
-  localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(records));
+  return [];
 }
 
 function createWord(english, meaning, pos, group) {
@@ -211,19 +99,7 @@ function createWord(english, meaning, pos, group) {
 }
 
 function loadPartsOfSpeech() {
-  const saved = localStorage.getItem(STORAGE_KEYS.partsOfSpeech);
-  const extras = saved ? JSON.parse(saved) : [];
-  const merged = [...DEFAULT_PARTS_OF_SPEECH];
-  for (const pos of extras) {
-    const name = String(pos || "").trim();
-    if (name && !merged.includes(name)) merged.push(name);
-  }
-  return merged;
-}
-
-function savePartsOfSpeech() {
-  const extras = partsOfSpeech.filter((pos) => !DEFAULT_PARTS_OF_SPEECH.includes(pos));
-  localStorage.setItem(STORAGE_KEYS.partsOfSpeech, JSON.stringify(extras));
+  return [...DEFAULT_PARTS_OF_SPEECH];
 }
 
 function resolvePos(raw) {
@@ -237,7 +113,6 @@ function resolvePos(raw) {
   if (matched) return matched;
 
   partsOfSpeech.push(pos);
-  savePartsOfSpeech();
   return pos;
 }
 
@@ -489,7 +364,6 @@ function renderSettings() {
       return;
     }
     settings = { quizSize, quizMinutes, quizFormat };
-    saveSettings();
     alert("환경 설정을 저장했습니다.");
     renderHome();
   });
@@ -727,7 +601,6 @@ function finishQuiz() {
     answers: quiz.answers,
   };
   records.unshift(record);
-  saveRecords();
   stopQuizTimer();
   quiz = null;
   renderResult(record, true);
@@ -861,7 +734,6 @@ function renderWords() {
     wordPageSize = Math.min(nextSize, 200);
     pageSizeInput.value = String(wordPageSize);
     wordPage = 1;
-    savePageSize();
     drawWordTable(search.value);
   });
   sortBtn.addEventListener("click", (event) => {
@@ -1018,7 +890,6 @@ function openAddModal() {
       return;
     }
     words.unshift(createWord(english, meaning, pos, wordGroup));
-    saveWords();
     closeModal();
     drawWordTable(document.getElementById("wordSearch").value);
   });
@@ -1165,7 +1036,6 @@ function applyImportedWords(imported) {
   }
 
   words = [...addedWords, ...words];
-  saveWords();
   wordPage = 1;
   closeModal();
   drawWordTable(document.getElementById("wordSearch").value);
@@ -1219,7 +1089,6 @@ function openEditModal(id) {
     word.english = english;
     word.meaning = meaning;
     word.pos = pos;
-    saveWords();
     closeModal();
     drawWordTable(document.getElementById("wordSearch").value);
   });
@@ -1230,7 +1099,6 @@ function deleteWord(id) {
   if (!word) return;
   if (!confirm(`'${word.english}' 단어를 삭제할까요?`)) return;
   words = words.filter((item) => item.id !== id);
-  saveWords();
   drawWordTable(document.getElementById("wordSearch").value);
 }
 
