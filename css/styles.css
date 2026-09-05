@@ -201,6 +201,32 @@ main {
   margin-top: 28px;
 }
 
+.group-select-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.group-select-wrap select {
+  flex: 1;
+  max-width: 420px;
+}
+
+.group-picker {
+  display: grid;
+  gap: 16px;
+}
+
+.menu-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 .settings-form {
   display: grid;
   gap: 20px;
@@ -502,6 +528,44 @@ th {
   grid-template-columns: 1fr auto auto;
   gap: 12px;
   align-items: end;
+}
+
+.choice-list {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.choice-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.choice-option:has(input:checked) {
+  border-color: var(--navy);
+  background: #f3f6f8;
+}
+
+.choice-option input {
+  width: auto;
+  margin-top: 3px;
+}
+
+.choice-option span {
+  line-height: 1.5;
+}
+
+.quiz-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .scoreboard {

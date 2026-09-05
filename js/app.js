@@ -7,8 +7,10 @@ const STORAGE_KEYS = {
 };
 
 const QUIZ_SIZE_OPTIONS = [10, 20, 30, 40, 50];
+const QUIZ_FORMAT_OPTIONS = ["주관식", "객관식"];
 const DEFAULT_QUIZ_SIZE = 30;
 const DEFAULT_QUIZ_MINUTES = 10;
+const DEFAULT_QUIZ_FORMAT = "주관식";
 const MIN_QUIZ_MINUTES = 10;
 const MAX_QUIZ_MINUTES = 99;
 
@@ -22,6 +24,9 @@ const SORT_OPTIONS = [
 ];
 
 const DEFAULT_PAGE_SIZE = 20;
+
+const WORD_GROUPS = ["Intensive Reading Book 단어", "교과서 영어 단어", "VOCA 영어 단어"];
+const DEFAULT_WORD_GROUP = WORD_GROUPS[0];
 
 const DEFAULT_WORDS = [
   ["abandon", "버리다, 포기하다", "동사"],
@@ -82,6 +87,7 @@ let quizTimerId = null;
 let wordSort = "date";
 let wordPage = 1;
 let wordPageSize = loadPageSize();
+let wordGroup = DEFAULT_WORD_GROUP;
 let settings = loadSettings();
 
 document.getElementById("homeBtn").addEventListener("click", () => {
@@ -107,7 +113,7 @@ renderHome();
 function loadWords() {
   const saved = localStorage.getItem(STORAGE_KEYS.words);
   if (saved) return migrateWords(JSON.parse(saved));
-  const seeded = DEFAULT_WORDS.map(([english, meaning, pos]) => createWord(english, meaning, pos));
+  const seeded = DEFAULT_WORDS.map(([english, meaning, pos]) => createWord(english, meaning, pos, DEFAULT_WORD_GROUP));
   localStorage.setItem(STORAGE_KEYS.words, JSON.stringify(seeded));
   return seeded;
 }
@@ -115,21 +121,39 @@ function loadWords() {
 function migrateWords(list) {
   let changed = false;
   const migrated = list.map((word) => {
-    if (word.pos) return word;
-    changed = true;
-    return {
-      ...word,
-      pos: DEFAULT_POS_BY_ENGLISH.get(word.english.toLowerCase()) || "명사",
-    };
+    let next = word;
+    if (!word.pos) {
+      changed = true;
+      next = {
+        ...next,
+        pos: DEFAULT_POS_BY_ENGLISH.get(word.english.toLowerCase()) || "명사",
+      };
+    }
+    if (!WORD_GROUPS.includes(word.group)) {
+      changed = true;
+      next = { ...next, group: DEFAULT_WORD_GROUP };
+    }
+    return next;
   });
   if (changed) localStorage.setItem(STORAGE_KEYS.words, JSON.stringify(migrated));
   return migrated;
+}
+
+function wordsInGroup(group) {
+  return words.filter((word) => word.group === group);
+}
+
+function groupOptions(selected) {
+  return WORD_GROUPS.map(
+    (group) => `<option value="${escapeHtml(group)}" ${group === selected ? "selected" : ""}>${escapeHtml(group)}</option>`,
+  ).join("");
 }
 
 function loadSettings() {
   const defaults = {
     quizSize: DEFAULT_QUIZ_SIZE,
     quizMinutes: DEFAULT_QUIZ_MINUTES,
+    quizFormat: DEFAULT_QUIZ_FORMAT,
   };
   const saved = localStorage.getItem(STORAGE_KEYS.settings);
   if (!saved) return defaults;
@@ -141,7 +165,8 @@ function loadSettings() {
       Number.isInteger(minutes) && minutes >= MIN_QUIZ_MINUTES && minutes <= MAX_QUIZ_MINUTES
         ? minutes
         : defaults.quizMinutes;
-    return { quizSize, quizMinutes };
+    const quizFormat = QUIZ_FORMAT_OPTIONS.includes(parsed.quizFormat) ? parsed.quizFormat : defaults.quizFormat;
+    return { quizSize, quizMinutes, quizFormat };
   } catch {
     return defaults;
   }
@@ -174,12 +199,13 @@ function saveRecords() {
   localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(records));
 }
 
-function createWord(english, meaning, pos) {
+function createWord(english, meaning, pos, group) {
   return {
     id: crypto.randomUUID(),
     english: english.trim(),
     meaning: meaning.trim(),
     pos: pos || "명사",
+    group: WORD_GROUPS.includes(group) ? group : DEFAULT_WORD_GROUP,
     createdAt: Date.now(),
   };
 }
@@ -357,7 +383,7 @@ function renderHome() {
       <button class="menu-card" data-view="quiz">
         <span class="menu-index">01</span>
         <h2>시험 시작</h2>
-        <p>기본 ${settings.quizSize}문항. 영단어를 보고 뜻을 입력합니다.</p>
+        <p>단어 그룹을 고른 뒤 ${settings.quizSize}문항 · ${settings.quizFormat} 시험을 시작합니다.</p>
       </button>
       <button class="menu-card" data-view="words">
         <span class="menu-index">02</span>
@@ -392,7 +418,7 @@ function renderHome() {
   app.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
       const view = button.dataset.view;
-      if (view === "quiz") startQuiz();
+      if (view === "quiz") renderQuizGroupPicker();
       if (view === "words") renderWords();
       if (view === "records") renderRecords();
     });
@@ -429,6 +455,15 @@ function renderSettings() {
         />
         <p class="settings-hint">${MIN_QUIZ_MINUTES}분부터 ${MAX_QUIZ_MINUTES}분까지 입력할 수 있습니다.</p>
       </div>
+      <div>
+        <label for="quizFormatSelect">문제 형식</label>
+        <select id="quizFormatSelect" name="quizFormat">
+          ${QUIZ_FORMAT_OPTIONS.map(
+            (format) => `<option value="${format}" ${format === settings.quizFormat ? "selected" : ""}>${format}</option>`,
+          ).join("")}
+        </select>
+        <p class="settings-hint">주관식은 뜻을 직접 입력하고, 객관식은 5지선다에서 고릅니다.</p>
+      </div>
       <div class="modal-actions">
         <button type="submit" class="btn">저장</button>
       </div>
@@ -440,6 +475,7 @@ function renderSettings() {
     event.preventDefault();
     const quizSize = Number(event.target.quizSize.value);
     const quizMinutes = Number(event.target.quizMinutes.value);
+    const quizFormat = event.target.quizFormat.value;
     if (!QUIZ_SIZE_OPTIONS.includes(quizSize)) {
       alert("시험 문항 수를 다시 선택해 주세요.");
       return;
@@ -448,30 +484,80 @@ function renderSettings() {
       alert(`시험 시간은 ${MIN_QUIZ_MINUTES}분 이상 ${MAX_QUIZ_MINUTES}분 이하로 입력해 주세요.`);
       return;
     }
-    settings = { quizSize, quizMinutes };
+    if (!QUIZ_FORMAT_OPTIONS.includes(quizFormat)) {
+      alert("문제 형식을 다시 선택해 주세요.");
+      return;
+    }
+    settings = { quizSize, quizMinutes, quizFormat };
     saveSettings();
     alert("환경 설정을 저장했습니다.");
     renderHome();
   });
 }
 
-function startQuiz() {
-  if (words.length === 0) {
-    alert("등록된 단어가 없습니다. 먼저 단어를 추가해 주세요.");
+function renderQuizGroupPicker() {
+  updateHeader("시험 시작 · 그룹 선택");
+  app.innerHTML = `
+    <div class="toolbar">
+      <h1 class="section-title">시험 시작</h1>
+      <button class="btn secondary" id="backHome">홈으로</button>
+    </div>
+    <p class="lede">시험을 볼 단어 그룹을 선택하세요.</p>
+    <div class="group-picker">
+      ${WORD_GROUPS.map((group) => {
+        const count = wordsInGroup(group).length;
+        return `
+          <button type="button" class="menu-card" data-group="${escapeHtml(group)}" ${count === 0 ? "disabled" : ""}>
+            <span class="menu-index">${count}개</span>
+            <h2>${escapeHtml(group)}</h2>
+            <p>${count === 0 ? "등록된 단어가 없습니다." : "이 그룹의 단어로 시험을 시작합니다."}</p>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+
+  document.getElementById("backHome").addEventListener("click", renderHome);
+  app.querySelectorAll("[data-group]").forEach((button) => {
+    button.addEventListener("click", () => startQuiz(button.dataset.group));
+  });
+}
+
+function startQuiz(group = DEFAULT_WORD_GROUP) {
+  const selectedGroup = WORD_GROUPS.includes(group) ? group : DEFAULT_WORD_GROUP;
+  const pool = wordsInGroup(selectedGroup);
+  if (pool.length === 0) {
+    alert("선택한 그룹에 등록된 단어가 없습니다. 먼저 단어를 추가해 주세요.");
+    wordGroup = selectedGroup;
     renderWords();
     return;
   }
 
-  const questions = shuffle(words).slice(0, Math.min(settings.quizSize, words.length));
+  const questions = shuffle(pool)
+    .slice(0, Math.min(settings.quizSize, pool.length))
+    .map((word) => ({
+      ...word,
+      choices: settings.quizFormat === "객관식" ? buildChoiceOptions(word, pool) : null,
+    }));
   quiz = {
     questions,
     index: 0,
     answers: [],
     startedAt: Date.now(),
     timeLimitMs: settings.quizMinutes * 60 * 1000,
+    format: settings.quizFormat,
+    group: selectedGroup,
   };
   renderQuiz();
   startQuizTimer();
+}
+
+function buildChoiceOptions(current, pool = words) {
+  const distractors = shuffle(pool.filter((word) => word.id !== current.id && word.meaning !== current.meaning))
+    .map((word) => word.meaning)
+    .filter((meaning, index, list) => list.indexOf(meaning) === index)
+    .slice(0, 4);
+  return shuffle([current.meaning, ...distractors]);
 }
 
 function formatElapsed(ms) {
@@ -525,7 +611,7 @@ function renderQuiz() {
   const current = quiz.questions[quiz.index];
   const total = quiz.questions.length;
   const step = quiz.index + 1;
-  updateHeader(`시험 진행 중 · ${step} / ${total}`);
+  updateHeader(`시험 진행 중 · ${quiz.group} · ${step} / ${total}`);
 
   app.innerHTML = `
     <div class="toolbar">
@@ -540,20 +626,46 @@ function renderQuiz() {
       <span>총 ${total}문항</span>
     </div>
     <div class="progress-track"><div class="progress-bar" style="width: ${(step / total) * 100}%"></div></div>
-    <p class="lede">아래 영어 단어의 뜻을 입력한 뒤 확인을 누르세요. 모르면 모름을 누르세요.</p>
+    <p class="lede">${
+      quiz.format === "객관식"
+        ? "아래 영어 단어의 뜻을 보기에서 고른 뒤 확인을 누르세요. 모르면 모름을 누르세요."
+        : "아래 영어 단어의 뜻을 입력한 뒤 확인을 누르세요. 모르면 모름을 누르세요."
+    }</p>
     <div class="quiz-word">${escapeHtml(current.english)}</div>
-    <form class="quiz-input-row" id="quizForm">
-      <div>
-        <label for="meaningInput">뜻</label>
-        <input id="meaningInput" name="meaning" autocomplete="off" placeholder="뜻을 입력하세요" required />
-      </div>
-      <button class="btn" type="submit">확인</button>
-      <button class="btn secondary" type="button" id="unknownBtn">모름</button>
+    <form id="quizForm">
+      ${
+        quiz.format === "객관식"
+          ? `
+            <div class="choice-list">
+              ${(current.choices || [])
+                .map(
+                  (choice, index) => `
+                    <label class="choice-option">
+                      <input type="radio" name="meaning" value="${escapeHtml(choice)}" required />
+                      <span>${index + 1}. ${escapeHtml(choice)}</span>
+                    </label>
+                  `,
+                )
+                .join("")}
+            </div>
+            <div class="quiz-actions">
+              <button class="btn" type="submit">확인</button>
+              <button class="btn secondary" type="button" id="unknownBtn">모름</button>
+            </div>
+          `
+          : `
+            <div class="quiz-input-row">
+              <div>
+                <label for="meaningInput">뜻</label>
+                <input id="meaningInput" name="meaning" autocomplete="off" placeholder="뜻을 입력하세요" required />
+              </div>
+              <button class="btn" type="submit">확인</button>
+              <button class="btn secondary" type="button" id="unknownBtn">모름</button>
+            </div>
+          `
+      }
     </form>
   `;
-
-  const input = document.getElementById("meaningInput");
-  input.focus();
 
   document.getElementById("cancelQuiz").addEventListener("click", () => {
     if (confirm("시험을 중단하고 메인 화면으로 돌아갈까요?")) {
@@ -565,23 +677,33 @@ function renderQuiz() {
 
   document.getElementById("quizForm").addEventListener("submit", (event) => {
     event.preventDefault();
-    submitAnswer(input.value);
+    const selected = new FormData(event.target).get("meaning");
+    submitAnswer(String(selected || ""));
   });
 
   document.getElementById("unknownBtn").addEventListener("click", () => {
     submitAnswer("모름", true);
   });
+
+  const input = document.getElementById("meaningInput");
+  if (input) input.focus();
 }
 
 function submitAnswer(userAnswer, unknown = false) {
   if (!quiz || quiz.expired) return;
   const current = quiz.questions[quiz.index];
+  const answer = unknown ? "모름" : userAnswer.trim();
+  const correct = unknown
+    ? false
+    : quiz.format === "객관식"
+      ? answer === current.meaning
+      : isCorrectAnswer(answer, current.meaning);
   quiz.answers.push({
     wordId: current.id,
     english: current.english,
     meaning: current.meaning,
-    userAnswer: unknown ? "모름" : userAnswer.trim(),
-    correct: unknown ? false : isCorrectAnswer(userAnswer, current.meaning),
+    userAnswer: answer,
+    correct,
   });
 
   if (quiz.index < quiz.questions.length - 1) {
@@ -601,6 +723,7 @@ function finishQuiz() {
     date: Date.now(),
     total,
     correct,
+    group: quiz.group || DEFAULT_WORD_GROUP,
     answers: quiz.answers,
   };
   records.unshift(record);
@@ -632,6 +755,7 @@ function renderResult(record, justFinished) {
       </div>
       <div class="result-card">
         <p class="lede">${formatDate(record.date)}에 치른 시험입니다. 입력한 뜻과 원래 뜻을 비교해 보세요.</p>
+        <p>단어 그룹 · ${escapeHtml(record.group || DEFAULT_WORD_GROUP)}</p>
         <p>정답 ${record.correct}개 · 오답 ${record.total - record.correct}개</p>
       </div>
     </div>
@@ -671,11 +795,11 @@ function renderResult(record, justFinished) {
   });
 
   const retryBtn = document.getElementById("retryBtn");
-  if (retryBtn) retryBtn.addEventListener("click", startQuiz);
+  if (retryBtn) retryBtn.addEventListener("click", () => startQuiz(record.group));
 }
 
 function renderWords() {
-  updateHeader(`단어 관리 · ${words.length}개`);
+  updateHeader(`단어 관리 · ${wordGroup} · ${wordsInGroup(wordGroup).length}개`);
   app.innerHTML = `
     <div class="toolbar">
       <h1 class="section-title">단어 관리</h1>
@@ -684,6 +808,10 @@ function renderWords() {
         <button class="btn secondary" id="backHome">홈으로</button>
       </div>
     </div>
+    <label class="group-select-wrap" for="wordGroupSelect">
+      단어 그룹
+      <select id="wordGroupSelect">${groupOptions(wordGroup)}</select>
+    </label>
     <div class="search-row">
       <input id="wordSearch" placeholder="단어 또는 뜻 검색" />
       <label class="page-size-wrap" for="pageSizeInput">
@@ -709,6 +837,11 @@ function renderWords() {
 
   document.getElementById("backHome").addEventListener("click", renderHome);
   document.getElementById("openAddWord").addEventListener("click", openAddModal);
+  document.getElementById("wordGroupSelect").addEventListener("change", (event) => {
+    wordGroup = event.target.value;
+    wordPage = 1;
+    drawWordTable(document.getElementById("wordSearch").value);
+  });
 
   const search = document.getElementById("wordSearch");
   const pageSizeInput = document.getElementById("pageSizeInput");
@@ -752,11 +885,12 @@ function renderWords() {
 }
 
 function drawWordTable(keyword) {
-  updateHeader(`단어 관리 · ${words.length}개`);
+  const grouped = wordsInGroup(wordGroup);
+  updateHeader(`단어 관리 · ${wordGroup} · ${grouped.length}개`);
   const query = keyword.trim().toLowerCase();
   const stats = buildWordStats();
   const filtered = sortWords(
-    words.filter(
+    grouped.filter(
       (word) =>
         word.english.toLowerCase().includes(query) ||
         word.meaning.toLowerCase().includes(query) ||
@@ -842,8 +976,9 @@ function drawWordTable(keyword) {
 
 function openAddModal() {
   openModal(
-    "단어 추가",
+    `단어 추가 · ${wordGroup}`,
     `
+      <p class="import-hint">선택한 그룹(${escapeHtml(wordGroup)})에 단어가 추가됩니다.</p>
       <div class="import-row">
         <button type="button" class="btn secondary" id="importFileBtn">파일로 추가</button>
         <input id="importFileInput" type="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json" hidden />
@@ -878,11 +1013,11 @@ function openAddModal() {
     const english = event.target.english.value.trim();
     const meaning = event.target.meaning.value.trim();
     const pos = event.target.pos.value;
-    if (words.some((word) => word.english.toLowerCase() === english.toLowerCase())) {
-      alert("이미 등록된 단어입니다.");
+    if (wordsInGroup(wordGroup).some((word) => word.english.toLowerCase() === english.toLowerCase())) {
+      alert("이 그룹에 이미 등록된 단어입니다.");
       return;
     }
-    words.unshift(createWord(english, meaning, pos));
+    words.unshift(createWord(english, meaning, pos, wordGroup));
     saveWords();
     closeModal();
     drawWordTable(document.getElementById("wordSearch").value);
@@ -1015,13 +1150,13 @@ function applyImportedWords(imported) {
   let skipped = 0;
 
   for (const item of imported) {
-    const exists = words.some((word) => word.english.toLowerCase() === item.english.toLowerCase());
+    const exists = wordsInGroup(wordGroup).some((word) => word.english.toLowerCase() === item.english.toLowerCase());
     const alreadyQueued = addedWords.some((word) => word.english.toLowerCase() === item.english.toLowerCase());
     if (exists || alreadyQueued) {
       skipped += 1;
       continue;
     }
-    addedWords.push(createWord(item.english, item.meaning, item.pos));
+    addedWords.push(createWord(item.english, item.meaning, item.pos, wordGroup));
   }
 
   if (!addedWords.length) {
@@ -1072,10 +1207,13 @@ function openEditModal(id) {
     const meaning = event.target.meaning.value.trim();
     const pos = event.target.pos.value;
     const duplicated = words.some(
-      (item) => item.id !== id && item.english.toLowerCase() === english.toLowerCase(),
+      (item) =>
+        item.id !== id &&
+        item.group === word.group &&
+        item.english.toLowerCase() === english.toLowerCase(),
     );
     if (duplicated) {
-      alert("이미 등록된 단어입니다.");
+      alert("이 그룹에 이미 등록된 단어입니다.");
       return;
     }
     word.english = english;
@@ -1123,7 +1261,7 @@ function renderRecords() {
             <article class="history-card">
               <div>
                 <h3>${percent}점 · ${record.correct}/${record.total}</h3>
-                <p>${formatDate(record.date)} · ${record.total}문항</p>
+                <p>${formatDate(record.date)} · ${escapeHtml(record.group || DEFAULT_WORD_GROUP)} · ${record.total}문항</p>
               </div>
               <button class="btn secondary" data-record="${record.id}">상세 보기</button>
             </article>
