@@ -646,6 +646,41 @@ th {
   color: var(--wrong);
 }
 
+.result-count-btn {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.result-count-btn.ok {
+  color: var(--correct);
+}
+
+.result-count-btn.ng {
+  color: var(--wrong);
+}
+
+.wrong-emphasis {
+  font-weight: 700;
+}
+
+.answer-list-wrap {
+  max-height: min(60vh, 480px);
+  overflow: auto;
+  padding: 0;
+  margin-bottom: 16px;
+}
+
+.modal:has(.answer-list-wrap) {
+  width: min(640px, 100%);
+}
+
 .history-list {
   display: grid;
   gap: 12px;

@@ -863,6 +863,7 @@ async function finishQuiz() {
 
 function renderResult(record, justFinished) {
   const percent = Math.round((record.correct / record.total) * 100);
+  const wrongCount = record.total - record.correct;
   updateHeader(justFinished ? "시험 완료" : "시험 기록 상세");
 
   app.innerHTML = `
@@ -885,7 +886,11 @@ function renderResult(record, justFinished) {
         <p class="lede">${formatDate(record.date)}에 치른 시험입니다. 입력한 뜻과 원래 뜻을 비교해 보세요.</p>
         <p>단어 그룹 · ${escapeHtml(record.group || DEFAULT_WORD_GROUP)}</p>
         <p>소요 시간 · ${formatElapsed((Number(record.duration) || 0) * 1000)}</p>
-        <p>정답 ${record.correct}개 · 오답 ${record.total - record.correct}개</p>
+        <p>
+          <button type="button" class="result-count-btn ok" data-answer-list="correct">정답 ${record.correct}개</button>
+          ·
+          <button type="button" class="result-count-btn ng" data-answer-list="wrong">오답 ${wrongCount}개</button>
+        </p>
       </div>
     </div>
     <div class="table-wrap">
@@ -905,8 +910,8 @@ function renderResult(record, justFinished) {
               (item, index) => `
                 <tr>
                   <td>${index + 1}</td>
-                  <td>${escapeHtml(item.english)}</td>
-                  <td>${escapeHtml(item.meaning)}</td>
+                  <td${item.correct ? "" : ' class="wrong-emphasis"'}>${escapeHtml(item.english)}</td>
+                  <td${item.correct ? "" : ' class="wrong-emphasis"'}>${escapeHtml(item.meaning)}</td>
                   <td>${escapeHtml(item.userAnswer || "-")}</td>
                   <td><span class="badge ${item.correct ? "ok" : "ng"}">${item.correct ? "정답" : "오답"}</span></td>
                 </tr>
@@ -923,8 +928,72 @@ function renderResult(record, justFinished) {
     else renderRecords();
   });
 
+  document.querySelectorAll("[data-answer-list]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openAnswerListModal(record, button.dataset.answerList === "correct");
+    });
+  });
+
   const retryBtn = document.getElementById("retryBtn");
   if (retryBtn) retryBtn.addEventListener("click", () => startQuiz(record.group));
+}
+
+function answerPos(item, record) {
+  if (item.pos) return item.pos;
+  const english = String(item.english || "").toLowerCase();
+  const match = words.find(
+    (word) =>
+      word.english.toLowerCase() === english &&
+      (!record?.group || word.group === record.group),
+  );
+  return match?.pos || "-";
+}
+
+function openAnswerListModal(record, correctOnly) {
+  const items = (record.answers || []).filter((item) => Boolean(item.correct) === correctOnly);
+  const label = correctOnly ? "정답" : "오답";
+  const listHtml =
+    items.length === 0
+      ? `<div class="empty-state">${label} 단어가 없습니다.</div>`
+      : `
+        <div class="table-wrap answer-list-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="col-num">번호</th>
+                <th>영단어</th>
+                <th>품사</th>
+                <th>뜻</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items
+                .map(
+                  (item, index) => `
+                    <tr>
+                      <td class="col-num">${index + 1}</td>
+                      <td>${escapeHtml(item.english)}</td>
+                      <td><span class="pos-tag">${escapeHtml(answerPos(item, record))}</span></td>
+                      <td>${escapeHtml(item.meaning)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+  openModal(
+    `${label} 단어 · ${items.length}개`,
+    `
+      ${listHtml}
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" id="closeAnswerList">닫기</button>
+      </div>
+    `,
+  );
+  document.getElementById("closeAnswerList").addEventListener("click", closeModal);
 }
 
 function renderWords() {
@@ -1405,17 +1474,88 @@ async function deleteSelectedWords(keyword = "") {
   drawWordTable(keyword);
 }
 
+function collectWrongWords() {
+  const seen = new Set();
+  const items = [];
+  for (const record of records) {
+    for (const answer of record.answers || []) {
+      if (answer.correct) continue;
+      const english = String(answer.english || "").trim();
+      if (!english) continue;
+      const key = `${record.group || ""}::${english.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({
+        english,
+        pos: answerPos(answer, record),
+        meaning: answer.meaning || "",
+      });
+    }
+  }
+  return items.sort((a, b) => a.english.localeCompare(b.english, "en", { sensitivity: "base" }));
+}
+
+function openAllWrongWordsModal() {
+  const items = collectWrongWords();
+  const listHtml =
+    items.length === 0
+      ? `<div class="empty-state">전체 시험에서 오답인 단어가 없습니다.</div>`
+      : `
+        <div class="table-wrap answer-list-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="col-num">번호</th>
+                <th>영단어</th>
+                <th>품사</th>
+                <th>뜻</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items
+                .map(
+                  (item, index) => `
+                    <tr>
+                      <td class="col-num">${index + 1}</td>
+                      <td>${escapeHtml(item.english)}</td>
+                      <td><span class="pos-tag">${escapeHtml(item.pos)}</span></td>
+                      <td>${escapeHtml(item.meaning)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+  openModal(
+    `오답 단어 · ${items.length}개`,
+    `
+      ${listHtml}
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" id="closeAnswerList">닫기</button>
+      </div>
+    `,
+  );
+  document.getElementById("closeAnswerList").addEventListener("click", closeModal);
+}
+
 function renderRecords() {
   updateHeader(`시험 기록 · ${records.length}건`);
   app.innerHTML = `
     <div class="toolbar">
       <h1 class="section-title">시험 기록 조회</h1>
-      <button class="btn secondary" id="backHome">홈으로</button>
+      <div class="actions">
+        <button class="btn" id="openWrongWords">오답 단어 보기</button>
+        <button class="btn secondary" id="backHome">홈으로</button>
+      </div>
     </div>
     <div id="recordList"></div>
   `;
 
   document.getElementById("backHome").addEventListener("click", renderHome);
+  document.getElementById("openWrongWords").addEventListener("click", openAllWrongWordsModal);
   const list = document.getElementById("recordList");
 
   if (records.length === 0) {
