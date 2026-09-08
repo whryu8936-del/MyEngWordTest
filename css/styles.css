@@ -532,12 +532,27 @@ th {
   flex-wrap: wrap;
 }
 
+.quiz-times {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.quiz-total-time,
 .quiz-timer {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.04em;
-  color: var(--terracotta);
-  font-size: 22px;
+  font-size: 25.3px;
   font-weight: 700;
+}
+
+.quiz-total-time {
+  color: var(--navy);
+}
+
+.quiz-timer {
+  color: var(--terracotta);
 }
 
 .quiz-word {

@@ -3,8 +3,8 @@ const QUIZ_FORMAT_OPTIONS = ["주관식", "객관식"];
 const DEFAULT_QUIZ_SIZE = 30;
 const DEFAULT_QUIZ_MINUTES = 10;
 const DEFAULT_QUIZ_FORMAT = "주관식";
-const MIN_QUIZ_MINUTES = 10;
-const MAX_QUIZ_MINUTES = 99;
+const MIN_QUIZ_MINUTES = 1;
+const MAX_QUIZ_MINUTES = 100;
 
 const DEFAULT_PARTS_OF_SPEECH = ["명사", "동사", "형용사", "부사", "전치사", "관용구", "관계대명사", "접속사", "대명사"];
 
@@ -531,7 +531,16 @@ function renderSettings() {
         </select>
       </div>
       <div>
-        <label for="quizMinutesInput">시험 시간 (분)</label>
+        <label for="quizFormatSelect">문제 형식</label>
+        <select id="quizFormatSelect" name="quizFormat">
+          ${QUIZ_FORMAT_OPTIONS.map(
+            (format) => `<option value="${format}" ${format === settings.quizFormat ? "selected" : ""}>${format}</option>`,
+          ).join("")}
+        </select>
+        <p class="settings-hint">주관식은 뜻을 직접 입력하고, 객관식은 5지선다에서 고릅니다.</p>
+      </div>
+      <div>
+        <label for="quizMinutesInput">시험 시간 지정</label>
         <input
           id="quizMinutesInput"
           name="quizMinutes"
@@ -541,16 +550,7 @@ function renderSettings() {
           value="${settings.quizMinutes}"
           required
         />
-        <p class="settings-hint">${MIN_QUIZ_MINUTES}분부터 ${MAX_QUIZ_MINUTES}분까지 입력할 수 있습니다.</p>
-      </div>
-      <div>
-        <label for="quizFormatSelect">문제 형식</label>
-        <select id="quizFormatSelect" name="quizFormat">
-          ${QUIZ_FORMAT_OPTIONS.map(
-            (format) => `<option value="${format}" ${format === settings.quizFormat ? "selected" : ""}>${format}</option>`,
-          ).join("")}
-        </select>
-        <p class="settings-hint">주관식은 뜻을 직접 입력하고, 객관식은 5지선다에서 고릅니다.</p>
+        <p class="settings-hint">분 단위로 입력합니다. 기본값 10분, ${MIN_QUIZ_MINUTES}분부터 ${MAX_QUIZ_MINUTES}분까지 지정할 수 있습니다.</p>
       </div>
       <div class="modal-actions">
         <button type="submit" class="btn">저장</button>
@@ -661,11 +661,20 @@ function formatElapsed(ms) {
   return `${hours}:${minutes}:${seconds}`;
 }
 
+function formatElapsedPrecise(ms) {
+  const totalMs = Math.max(0, Math.floor(ms));
+  const hours = String(Math.floor(totalMs / 3600000)).padStart(2, "0");
+  const minutes = String(Math.floor((totalMs % 3600000) / 60000)).padStart(2, "0");
+  const seconds = String(Math.floor((totalMs % 60000) / 1000)).padStart(2, "0");
+  const millis = String(totalMs % 1000).padStart(3, "0");
+  return `${hours}:${minutes}:${seconds}.${millis}`;
+}
+
 function updateQuizTimer() {
   if (!quiz?.startedAt) return;
   const elapsed = Date.now() - quiz.startedAt;
   const timer = document.getElementById("quizTimer");
-  if (timer) timer.textContent = formatElapsed(elapsed);
+  if (timer) timer.textContent = `시험 경과 시간: ${formatElapsedPrecise(elapsed)}`;
   if (quiz.timeLimitMs && elapsed >= quiz.timeLimitMs) expireQuiz();
 }
 
@@ -690,13 +699,16 @@ function expireQuiz() {
 
 function startQuizTimer() {
   stopQuizTimer();
-  updateQuizTimer();
-  quizTimerId = setInterval(updateQuizTimer, 250);
+  const tick = () => {
+    updateQuizTimer();
+    if (quiz && !quiz.expired) quizTimerId = requestAnimationFrame(tick);
+  };
+  quizTimerId = requestAnimationFrame(tick);
 }
 
 function stopQuizTimer() {
   if (quizTimerId) {
-    clearInterval(quizTimerId);
+    cancelAnimationFrame(quizTimerId);
     quizTimerId = null;
   }
 }
@@ -711,7 +723,10 @@ function renderQuiz() {
     <div class="toolbar">
       <div class="quiz-title-row">
         <h1 class="section-title">시험 시작</h1>
-        <span class="quiz-timer" id="quizTimer">${formatElapsed(Date.now() - quiz.startedAt)}</span>
+        <div class="quiz-times">
+          <span class="quiz-total-time">총 시험 시간: ${formatElapsed(quiz.timeLimitMs)}</span>
+          <span class="quiz-timer" id="quizTimer">시험 경과 시간: ${formatElapsedPrecise(Date.now() - quiz.startedAt)}</span>
+        </div>
       </div>
       <button class="btn secondary" id="cancelQuiz">그만두기</button>
     </div>
