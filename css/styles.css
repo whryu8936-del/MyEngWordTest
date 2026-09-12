@@ -678,7 +678,26 @@ th {
 }
 
 .modal:has(.answer-list-wrap) {
-  width: min(640px, 100%);
+  width: min(760px, 100%);
+}
+
+.modal:has(.wrong-note-wrap) {
+  width: max-content;
+  max-width: calc(100vw - 40px);
+}
+
+.wrong-note-wrap {
+  overflow-x: auto;
+}
+
+.wrong-note-wrap table {
+  width: max-content;
+  min-width: 100%;
+}
+
+.wrong-note-wrap th,
+.wrong-note-wrap td {
+  white-space: nowrap;
 }
 
 .history-list {

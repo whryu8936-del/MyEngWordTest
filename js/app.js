@@ -19,6 +19,7 @@ const DEFAULT_PAGE_SIZE = 20;
 
 const WORD_GROUPS = ["Intensive Reading Book 단어", "교과서 영어 단어", "VOCA 영어 단어"];
 const DEFAULT_WORD_GROUP = WORD_GROUPS[0];
+const WRONG_WORD_QUIZ = "오답 단어";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAsWSpkljhwHSURAcgWna_H3gSCDyGF01Y",
@@ -160,6 +161,7 @@ function toFirebaseExam(record) {
       korean_mean: item.meaning,
       correct: item.correct ? "정답" : "오답",
       answer: item.userAnswer || "",
+      word_group: WORD_GROUPS.includes(item.group) ? item.group : record.group || DEFAULT_WORD_GROUP,
     })),
   };
 }
@@ -171,6 +173,11 @@ function fromFirebaseExam(item) {
     meaning: entry.korean_mean || "",
     userAnswer: entry.answer || "",
     correct: isStoredCorrect(entry.correct),
+    group: WORD_GROUPS.includes(entry.word_group)
+      ? entry.word_group
+      : WORD_GROUPS.includes(entry.Group)
+        ? entry.Group
+        : "",
   }));
   return {
     id: crypto.randomUUID(),
@@ -178,7 +185,7 @@ function fromFirebaseExam(item) {
     duration: Number(item.test_duration) || 0,
     total: answers.length,
     correct: answers.filter((answer) => answer.correct).length,
-    group: WORD_GROUPS.includes(item.word_group) ? item.word_group : DEFAULT_WORD_GROUP,
+    group: isQuizCategory(item.word_group) ? item.word_group : DEFAULT_WORD_GROUP,
     answers,
   };
 }
@@ -295,8 +302,31 @@ async function initApp() {
   renderHome();
 }
 
+function isQuizCategory(group) {
+  return WORD_GROUPS.includes(group) || group === WRONG_WORD_QUIZ;
+}
+
 function wordsInGroup(group) {
   return words.filter((word) => word.group === group);
+}
+
+function answerGroup(answer, record) {
+  if (WORD_GROUPS.includes(answer?.group)) return answer.group;
+  if (WORD_GROUPS.includes(record?.group)) return record.group;
+  const english = String(answer?.english || "").toLowerCase();
+  const match = words.find((word) => word.english.toLowerCase() === english);
+  return match?.group || DEFAULT_WORD_GROUP;
+}
+
+function wordsEverWrong() {
+  return collectWrongWords().map((item) => {
+    const match = words.find(
+      (word) =>
+        word.english.toLowerCase() === item.english.toLowerCase() && word.group === item.group,
+    );
+    if (match) return match;
+    return createWord(item.english, item.meaning, item.pos, item.group);
+  });
 }
 
 function groupOptions(selected) {
@@ -597,16 +627,27 @@ function renderQuizGroupPicker() {
     </div>
     <p class="lede">시험을 볼 단어 그룹을 선택하세요.</p>
     <div class="group-picker">
-      ${WORD_GROUPS.map((group) => {
-        const count = wordsInGroup(group).length;
-        return `
+      ${[...WORD_GROUPS, WRONG_WORD_QUIZ]
+        .map((group) => {
+          const isWrongQuiz = group === WRONG_WORD_QUIZ;
+          const count = isWrongQuiz ? collectWrongWords().length : wordsInGroup(group).length;
+          return `
           <button type="button" class="menu-card" data-group="${escapeHtml(group)}" ${count === 0 ? "disabled" : ""}>
             <span class="menu-index">${count}개</span>
             <h2>${escapeHtml(group)}</h2>
-            <p>${count === 0 ? "등록된 단어가 없습니다." : "이 그룹의 단어로 시험을 시작합니다."}</p>
+            <p>${
+              count === 0
+                ? isWrongQuiz
+                  ? "오답인 단어가 없습니다."
+                  : "등록된 단어가 없습니다."
+                : isWrongQuiz
+                  ? "한 번이라도 틀린 단어로 시험을 시작합니다."
+                  : "이 그룹의 단어로 시험을 시작합니다."
+            }</p>
           </button>
         `;
-      }).join("")}
+        })
+        .join("")}
     </div>
   `;
 
@@ -617,20 +658,27 @@ function renderQuizGroupPicker() {
 }
 
 function startQuiz(group = DEFAULT_WORD_GROUP) {
-  const selectedGroup = WORD_GROUPS.includes(group) ? group : DEFAULT_WORD_GROUP;
-  const pool = wordsInGroup(selectedGroup);
+  const isWrongQuiz = group === WRONG_WORD_QUIZ;
+  const selectedGroup = isWrongQuiz || WORD_GROUPS.includes(group) ? group : DEFAULT_WORD_GROUP;
+  const pool = isWrongQuiz ? wordsEverWrong() : wordsInGroup(selectedGroup);
   if (pool.length === 0) {
+    if (isWrongQuiz) {
+      alert("오답인 단어가 없습니다. 다른 그룹에서 시험을 치른 뒤 다시 시도해 주세요.");
+      renderQuizGroupPicker();
+      return;
+    }
     alert("선택한 그룹에 등록된 단어가 없습니다. 먼저 단어를 추가해 주세요.");
     wordGroup = selectedGroup;
     renderWords();
     return;
   }
 
+  const choicePool = isWrongQuiz && words.length > 1 ? words : pool;
   const questions = shuffle(pool)
     .slice(0, Math.min(settings.quizSize, pool.length))
     .map((word) => ({
       ...word,
-      choices: settings.quizFormat === "객관식" ? buildChoiceOptions(word, pool) : null,
+      choices: settings.quizFormat === "객관식" ? buildChoiceOptions(word, choicePool) : null,
     }));
   quiz = {
     questions,
@@ -689,6 +737,7 @@ function expireQuiz() {
       english: current.english,
       pos: current.pos || "",
       meaning: current.meaning,
+      group: current.group || "",
       userAnswer: "시간 초과",
       correct: false,
     });
@@ -812,6 +861,7 @@ function submitAnswer(userAnswer, unknown = false) {
     english: current.english,
     pos: current.pos || "",
     meaning: current.meaning,
+    group: current.group || "",
     userAnswer: answer,
     correct,
   });
@@ -827,12 +877,14 @@ function submitAnswer(userAnswer, unknown = false) {
 
 function applyQuizStats(answers, group) {
   for (const answer of answers) {
+    const wordGroup = WORD_GROUPS.includes(answer.group) ? answer.group : group;
     const word =
       words.find((item) => item.id === answer.wordId) ||
       words.find(
         (item) =>
-          item.group === group && item.english.toLowerCase() === String(answer.english || "").toLowerCase(),
-      );
+          item.group === wordGroup && item.english.toLowerCase() === String(answer.english || "").toLowerCase(),
+      ) ||
+      words.find((item) => item.english.toLowerCase() === String(answer.english || "").toLowerCase());
     if (!word) continue;
     word.count = (Number(word.count) || 0) + 1;
     if (answer.correct) word.ansCount = (Number(word.ansCount) || 0) + 1;
@@ -1482,13 +1534,15 @@ function collectWrongWords() {
       if (answer.correct) continue;
       const english = String(answer.english || "").trim();
       if (!english) continue;
-      const key = `${record.group || ""}::${english.toLowerCase()}`;
+      const group = answerGroup(answer, record);
+      const key = `${group}::${english.toLowerCase()}`;
       if (seen.has(key)) continue;
       seen.add(key);
       items.push({
         english,
         pos: answerPos(answer, record),
         meaning: answer.meaning || "",
+        group,
       });
     }
   }
@@ -1501,7 +1555,7 @@ function openAllWrongWordsModal() {
     items.length === 0
       ? `<div class="empty-state">전체 시험에서 오답인 단어가 없습니다.</div>`
       : `
-        <div class="table-wrap answer-list-wrap">
+        <div class="table-wrap answer-list-wrap wrong-note-wrap">
           <table>
             <thead>
               <tr>
@@ -1509,6 +1563,7 @@ function openAllWrongWordsModal() {
                 <th>영단어</th>
                 <th>품사</th>
                 <th>뜻</th>
+                <th>단어 그룹</th>
               </tr>
             </thead>
             <tbody>
@@ -1520,6 +1575,7 @@ function openAllWrongWordsModal() {
                       <td>${escapeHtml(item.english)}</td>
                       <td><span class="pos-tag">${escapeHtml(item.pos)}</span></td>
                       <td>${escapeHtml(item.meaning)}</td>
+                      <td>${escapeHtml(item.group)}</td>
                     </tr>
                   `,
                 )
@@ -1530,7 +1586,7 @@ function openAllWrongWordsModal() {
       `;
 
   openModal(
-    `오답 단어 · ${items.length}개`,
+    `오답 노트 · ${items.length}개`,
     `
       ${listHtml}
       <div class="modal-actions">
@@ -1547,7 +1603,7 @@ function renderRecords() {
     <div class="toolbar">
       <h1 class="section-title">시험 기록 조회</h1>
       <div class="actions">
-        <button class="btn" id="openWrongWords">오답 단어 보기</button>
+        <button class="btn" id="openWrongWords">오답 노트</button>
         <button class="btn secondary" id="backHome">홈으로</button>
       </div>
     </div>
