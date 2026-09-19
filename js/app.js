@@ -45,7 +45,9 @@ const modalTitle = document.getElementById("modalTitle");
 const modalBody = document.getElementById("modalBody");
 
 let firebaseDb = null;
+let firebaseAuth = null;
 let firebaseReady = false;
+let currentUser = null;
 let words = [];
 let records = [];
 let partsOfSpeech = loadPartsOfSpeech();
@@ -59,10 +61,18 @@ let settings = loadSettings();
 let selectedWordIds = new Set();
 
 document.getElementById("homeBtn").addEventListener("click", () => {
+  if (!currentUser) {
+    renderLogin();
+    return;
+  }
   if (quiz && !confirm("진행 중인 시험을 종료하고 메인 화면으로 돌아갈까요?")) return;
   stopQuizTimer();
   quiz = null;
   renderHome();
+});
+
+document.getElementById("logoutBtn").addEventListener("click", () => {
+  signOutUser();
 });
 
 modalBackdrop.addEventListener("click", (event) => {
@@ -81,6 +91,7 @@ initApp();
 function initFirebase() {
   if (!window.firebase) throw new Error("Firebase SDK를 불러오지 못했습니다.");
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+  firebaseAuth = firebase.auth();
   firebaseDb = firebase.database();
 }
 
@@ -226,18 +237,22 @@ async function dbSet(path, value) {
   await firebaseDb.ref(path).set(value);
 }
 
+function isAuthenticated() {
+  return Boolean(firebaseReady && currentUser && firebaseAuth?.currentUser);
+}
+
 async function saveWordList() {
-  if (!firebaseReady) return;
+  if (!isAuthenticated()) return;
   await dbSet(DB_PATHS.words, words.map(toFirebaseWord));
 }
 
 async function saveExamList() {
-  if (!firebaseReady) return;
+  if (!isAuthenticated()) return;
   await dbSet(DB_PATHS.exams, records.map(toFirebaseExam));
 }
 
 async function saveSettingsToFirebase() {
-  if (!firebaseReady) return;
+  if (!isAuthenticated()) return;
   await dbSet(DB_PATHS.settings, toFirebaseSettings(settings));
 }
 
@@ -285,21 +300,179 @@ async function loadFromFirebase() {
   if (!rawSettings) await saveSettingsToFirebase();
 }
 
-async function initApp() {
-  renderLoading("Firebase에서 데이터를 불러오는 중입니다.");
+function resetSessionData() {
+  firebaseReady = false;
+  words = [];
+  records = [];
+  settings = loadSettings();
+  selectedWordIds = new Set();
+  partsOfSpeech = loadPartsOfSpeech();
+  stopQuizTimer();
+  quiz = null;
+}
+
+function updateAuthBar() {
+  const logoutBtn = document.getElementById("logoutBtn");
+  logoutBtn.classList.toggle("hidden", !currentUser);
+}
+
+function authErrorMessage(error) {
+  const code = error?.code || "";
+  if (code === "auth/invalid-email") return "이메일 형식이 올바르지 않습니다.";
+  if (code === "auth/user-not-found" || code === "auth/wrong-password" || code === "auth/invalid-credential") {
+    return "이메일 또는 비밀번호가 올바르지 않습니다.";
+  }
+  if (code === "auth/email-already-in-use") return "이미 가입된 이메일입니다. 로그인해 주세요.";
+  if (code === "auth/weak-password") return "비밀번호는 6자 이상이어야 합니다.";
+  if (code === "auth/popup-closed-by-user") return "Google 로그인이 취소되었습니다.";
+  if (code === "auth/popup-blocked") return "팝업이 차단되었습니다. 팝업을 허용한 뒤 다시 시도해 주세요.";
+  if (code === "auth/network-request-failed") return "네트워크 연결을 확인해 주세요.";
+  if (code === "auth/too-many-requests") return "시도 횟수가 많습니다. 잠시 후 다시 시도해 주세요.";
+  return error?.message || "로그인에 실패했습니다.";
+}
+
+function showLoginError(message) {
+  const box = document.getElementById("loginError");
+  if (!box) return;
+  box.textContent = message;
+  box.classList.toggle("hidden", !message);
+}
+
+function setLoginBusy(busy) {
+  document.querySelectorAll("#loginForm button, #googleLoginBtn").forEach((button) => {
+    button.disabled = busy;
+  });
+}
+
+async function signInWithEmail(email, password) {
+  await firebaseAuth.signInWithEmailAndPassword(email, password);
+}
+
+async function registerWithEmail(email, password) {
+  await firebaseAuth.createUserWithEmailAndPassword(email, password);
+}
+
+async function signInWithGoogle() {
+  const provider = new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
   try {
-    initFirebase();
-    firebaseReady = true;
-    await loadFromFirebase();
+    await firebaseAuth.signInWithPopup(provider);
+  } catch (error) {
+    if (error.code === "auth/popup-blocked") {
+      await firebaseAuth.signInWithRedirect(provider);
+      return;
+    }
+    throw error;
+  }
+}
+
+async function signOutUser() {
+  if (quiz && !confirm("진행 중인 시험을 종료하고 로그아웃할까요?")) return;
+  try {
+    await firebaseAuth.signOut();
   } catch (error) {
     console.error(error);
-    firebaseReady = false;
-    words = [];
-    records = [];
-    settings = loadSettings();
-    alert("Firebase 데이터를 불러오지 못했습니다. 빈 상태로 시작합니다.");
+    alert("로그아웃하지 못했습니다.");
   }
-  renderHome();
+}
+
+function renderLogin() {
+  updateHeader("로그인이 필요합니다");
+  app.innerHTML = `
+    <section class="hero">
+      <h1>로그인 후<br />단어를 관리하세요</h1>
+      <p>이메일과 비밀번호 또는 Google 계정으로 Firebase에 인증한 뒤 데이터를 불러옵니다.</p>
+    </section>
+    <form class="settings-form login-form" id="loginForm">
+      <div>
+        <label for="loginEmail">이메일</label>
+        <input id="loginEmail" name="email" type="email" autocomplete="email" required />
+      </div>
+      <div>
+        <label for="loginPassword">비밀번호</label>
+        <input id="loginPassword" name="password" type="password" autocomplete="current-password" minlength="6" required />
+      </div>
+      <p class="login-error hidden" id="loginError"></p>
+      <div class="login-actions">
+        <button type="submit" class="btn" data-auth="signin">로그인</button>
+        <button type="submit" class="btn secondary" data-auth="signup">회원가입</button>
+      </div>
+      <div class="import-divider">또는</div>
+      <button type="button" class="btn secondary google-login" id="googleLoginBtn">Google로 로그인</button>
+    </form>
+  `;
+
+  const form = document.getElementById("loginForm");
+  let authMode = "signin";
+  form.querySelectorAll("[data-auth]").forEach((button) => {
+    button.addEventListener("click", () => {
+      authMode = button.dataset.auth;
+    });
+  });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const email = form.email.value.trim();
+    const password = form.password.value;
+    showLoginError("");
+    setLoginBusy(true);
+    try {
+      if (authMode === "signup") await registerWithEmail(email, password);
+      else await signInWithEmail(email, password);
+    } catch (error) {
+      console.error(error);
+      showLoginError(authErrorMessage(error));
+      setLoginBusy(false);
+    }
+  });
+  document.getElementById("googleLoginBtn").addEventListener("click", async () => {
+    showLoginError("");
+    setLoginBusy(true);
+    try {
+      await signInWithGoogle();
+    } catch (error) {
+      console.error(error);
+      showLoginError(authErrorMessage(error));
+      setLoginBusy(false);
+    }
+  });
+}
+
+async function initApp() {
+  renderLoading("인증 상태를 확인하는 중입니다.");
+  try {
+    initFirebase();
+    await firebaseAuth.getRedirectResult();
+  } catch (error) {
+    console.error(error);
+    if (error.code && error.code !== "auth/no-auth-event") {
+      alert(authErrorMessage(error));
+    }
+  }
+
+  firebaseAuth.onAuthStateChanged(async (user) => {
+    currentUser = user;
+    updateAuthBar();
+    if (!user) {
+      resetSessionData();
+      renderLogin();
+      return;
+    }
+
+    renderLoading("Firebase에서 데이터를 불러오는 중입니다.");
+    try {
+      firebaseReady = true;
+      await loadFromFirebase();
+      renderHome();
+    } catch (error) {
+      console.error(error);
+      firebaseReady = false;
+      words = [];
+      records = [];
+      settings = loadSettings();
+      alert("Firebase 데이터를 불러오지 못했습니다. 로그인 상태이지만 데이터를 읽지 못했습니다.");
+      renderHome();
+    }
+  });
 }
 
 function isQuizCategory(group) {

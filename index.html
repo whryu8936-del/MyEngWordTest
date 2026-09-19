@@ -16,7 +16,10 @@
         <span class="brand-mark">Vocab</span>
         <span class="brand-title">영단어 암기장</span>
       </button>
-      <p class="header-meta" id="headerMeta"></p>
+      <div class="header-side">
+        <p class="header-meta" id="headerMeta"></p>
+        <button type="button" class="header-logout hidden" id="logoutBtn">로그아웃</button>
+      </div>
     </header>
 
     <main id="app"></main>
@@ -30,6 +33,7 @@
   </div>
 
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
   <script src="js/app.js"></script>
 </body>
