@@ -5,6 +5,7 @@ const DEFAULT_QUIZ_MINUTES = 10;
 const DEFAULT_QUIZ_FORMAT = "주관식";
 const MIN_QUIZ_MINUTES = 1;
 const MAX_QUIZ_MINUTES = 100;
+const MAX_QUIZ_HINT_LETTERS = 3;
 
 const DEFAULT_PARTS_OF_SPEECH = ["명사", "동사", "형용사", "부사", "전치사", "관용구", "관계대명사", "접속사", "대명사"];
 
@@ -865,6 +866,7 @@ function startQuiz(group = DEFAULT_WORD_GROUP) {
     timeLimitMs: settings.quizMinutes * 60 * 1000,
     format: settings.quizFormat,
     group: selectedGroup,
+    hintLevel: 0,
   };
   renderQuiz();
   startQuizTimer();
@@ -939,6 +941,47 @@ function stopQuizTimer() {
   }
 }
 
+function englishHintSource(english) {
+  return String(english || "").trim();
+}
+
+function maxHintLetters(english) {
+  return Math.min(MAX_QUIZ_HINT_LETTERS, englishHintSource(english).length);
+}
+
+function quizHintPreview(english, level) {
+  return englishHintSource(english).slice(0, Math.max(0, Number(level) || 0));
+}
+
+function updateQuizHintUi() {
+  if (!quiz || quiz.format !== "주관식") return;
+  const current = quiz.questions[quiz.index];
+  const level = quiz.hintLevel || 0;
+  const max = maxHintLetters(current.english);
+  const hintEl = document.getElementById("quizHint");
+  const hintBtn = document.getElementById("hintBtn");
+  if (!hintEl || !hintBtn) return;
+  if (level > 0) {
+    hintEl.textContent = `힌트: ${quizHintPreview(current.english, level)}`;
+    hintEl.classList.remove("hidden");
+  } else {
+    hintEl.textContent = "";
+    hintEl.classList.add("hidden");
+  }
+  hintBtn.textContent = level === 0 ? "힌트" : "힌트 더보기";
+  hintBtn.disabled = max === 0 || level >= max;
+}
+
+function revealQuizHint() {
+  if (!quiz || quiz.expired || quiz.format !== "주관식") return;
+  const current = quiz.questions[quiz.index];
+  const max = maxHintLetters(current.english);
+  if ((quiz.hintLevel || 0) >= max) return;
+  quiz.hintLevel = (quiz.hintLevel || 0) + 1;
+  updateQuizHintUi();
+  document.getElementById("englishInput")?.focus();
+}
+
 function renderQuiz() {
   const current = quiz.questions[quiz.index];
   const total = quiz.questions.length;
@@ -969,6 +1012,16 @@ function renderQuiz() {
     <div class="quiz-word${quiz.format === "객관식" ? "" : " is-meaning"}">${escapeHtml(
       quiz.format === "객관식" ? current.english : current.meaning,
     )}</div>
+    ${
+      quiz.format === "주관식"
+        ? `
+          <div class="quiz-hint-row">
+            <p class="quiz-hint hidden" id="quizHint" aria-live="polite"></p>
+            <button type="button" class="btn secondary" id="hintBtn">힌트</button>
+          </div>
+        `
+        : ""
+    }
     <form id="quizForm">
       ${
         quiz.format === "객관식"
@@ -1022,6 +1075,12 @@ function renderQuiz() {
     submitAnswer("모름", true);
   });
 
+  const hintBtn = document.getElementById("hintBtn");
+  if (hintBtn) {
+    hintBtn.addEventListener("click", revealQuizHint);
+    updateQuizHintUi();
+  }
+
   const input = document.getElementById("englishInput");
   if (input) input.focus();
 }
@@ -1047,6 +1106,7 @@ function submitAnswer(userAnswer, unknown = false) {
 
   if (quiz.index < quiz.questions.length - 1) {
     quiz.index += 1;
+    quiz.hintLevel = 0;
     renderQuiz();
     return;
   }

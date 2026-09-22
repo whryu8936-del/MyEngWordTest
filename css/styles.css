@@ -612,6 +612,24 @@ th {
   word-break: keep-all;
 }
 
+.quiz-hint-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: -8px 0 24px;
+  min-height: 44px;
+}
+
+.quiz-hint {
+  margin: 0;
+  font-family: "Fraunces", serif;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--navy);
+}
+
 .quiz-input-row {
   display: grid;
   grid-template-columns: 1fr auto auto;
