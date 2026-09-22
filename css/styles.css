@@ -604,6 +604,14 @@ th {
   margin: 8px 0 28px;
 }
 
+.quiz-word.is-meaning {
+  font-family: "Noto Sans KR", sans-serif;
+  font-size: clamp(28px, 4.6vw, 44px);
+  font-weight: 700;
+  line-height: 1.35;
+  word-break: keep-all;
+}
+
 .quiz-input-row {
   display: grid;
   grid-template-columns: 1fr auto auto;

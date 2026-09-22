@@ -637,6 +637,10 @@ function isCorrectAnswer(userAnswer, meaning) {
   return answers.includes(input);
 }
 
+function isCorrectEnglish(userAnswer, english) {
+  return normalizeAnswer(userAnswer) === normalizeAnswer(english);
+}
+
 function shuffle(list) {
   const copy = [...list];
   for (let i = copy.length - 1; i > 0; i -= 1) {
@@ -668,7 +672,7 @@ function renderHome() {
   app.innerHTML = `
     <section class="hero">
       <h1>오늘 외울 단어를<br />시험으로 점검하세요</h1>
-      <p>영어 단어를 보고 뜻을 입력한 뒤, 결과표와 기록을 바로 확인할 수 있습니다.</p>
+      <p>단어의 뜻을 보고 영어 단어를 입력한 뒤, 결과표와 기록을 바로 확인할 수 있습니다.</p>
     </section>
     <div class="menu-grid">
       <button class="menu-card" data-view="quiz">
@@ -740,7 +744,7 @@ function renderSettings() {
             (format) => `<option value="${format}" ${format === settings.quizFormat ? "selected" : ""}>${format}</option>`,
           ).join("")}
         </select>
-        <p class="settings-hint">주관식은 뜻을 직접 입력하고, 객관식은 5지선다에서 고릅니다.</p>
+        <p class="settings-hint">주관식은 뜻을 보고 영어 단어를 입력하고, 객관식은 영어 단어의 뜻을 5지선다에서 고릅니다.</p>
       </div>
       <div>
         <label for="quizMinutesInput">시험 시간 지정</label>
@@ -960,9 +964,11 @@ function renderQuiz() {
     <p class="lede">${
       quiz.format === "객관식"
         ? "아래 영어 단어의 뜻을 보기에서 고른 뒤 확인을 누르세요. 모르면 모름을 누르세요."
-        : "아래 영어 단어의 뜻을 입력한 뒤 확인을 누르세요. 모르면 모름을 누르세요."
+        : "아래 뜻에 맞는 영어 단어를 입력한 뒤 확인을 누르세요. 모르면 모름을 누르세요."
     }</p>
-    <div class="quiz-word">${escapeHtml(current.english)}</div>
+    <div class="quiz-word${quiz.format === "객관식" ? "" : " is-meaning"}">${escapeHtml(
+      quiz.format === "객관식" ? current.english : current.meaning,
+    )}</div>
     <form id="quizForm">
       ${
         quiz.format === "객관식"
@@ -972,7 +978,7 @@ function renderQuiz() {
                 .map(
                   (choice, index) => `
                     <label class="choice-option">
-                      <input type="radio" name="meaning" value="${escapeHtml(choice)}" required />
+                      <input type="radio" name="answer" value="${escapeHtml(choice)}" required />
                       <span>${index + 1}. ${escapeHtml(choice)}</span>
                     </label>
                   `,
@@ -987,8 +993,8 @@ function renderQuiz() {
           : `
             <div class="quiz-input-row">
               <div>
-                <label for="meaningInput">뜻</label>
-                <input id="meaningInput" name="meaning" autocomplete="off" placeholder="뜻을 입력하세요" required />
+                <label for="englishInput">영단어</label>
+                <input id="englishInput" name="answer" autocomplete="off" placeholder="영어 단어를 입력하세요" required />
               </div>
               <button class="btn" type="submit">확인</button>
               <button class="btn secondary" type="button" id="unknownBtn">모름</button>
@@ -1008,7 +1014,7 @@ function renderQuiz() {
 
   document.getElementById("quizForm").addEventListener("submit", (event) => {
     event.preventDefault();
-    const selected = new FormData(event.target).get("meaning");
+    const selected = new FormData(event.target).get("answer");
     submitAnswer(String(selected || ""));
   });
 
@@ -1016,7 +1022,7 @@ function renderQuiz() {
     submitAnswer("모름", true);
   });
 
-  const input = document.getElementById("meaningInput");
+  const input = document.getElementById("englishInput");
   if (input) input.focus();
 }
 
@@ -1028,7 +1034,7 @@ function submitAnswer(userAnswer, unknown = false) {
     ? false
     : quiz.format === "객관식"
       ? answer === current.meaning
-      : isCorrectAnswer(answer, current.meaning);
+      : isCorrectEnglish(answer, current.english);
   quiz.answers.push({
     wordId: current.id,
     english: current.english,
@@ -1108,7 +1114,7 @@ function renderResult(record, justFinished) {
         </div>
       </div>
       <div class="result-card">
-        <p class="lede">${formatDate(record.date)}에 치른 시험입니다. 입력한 뜻과 원래 뜻을 비교해 보세요.</p>
+        <p class="lede">${formatDate(record.date)}에 치른 시험입니다. 입력한 답과 정답을 비교해 보세요.</p>
         <p>단어 그룹 · ${escapeHtml(record.group || DEFAULT_WORD_GROUP)}</p>
         <p>소요 시간 · ${formatElapsed((Number(record.duration) || 0) * 1000)}</p>
         <p>
@@ -1125,7 +1131,7 @@ function renderResult(record, justFinished) {
             <th>번호</th>
             <th>영단어</th>
             <th>원래 뜻</th>
-            <th>입력한 뜻</th>
+            <th>입력한 답</th>
             <th>결과</th>
           </tr>
         </thead>
