@@ -3,6 +3,8 @@ const QUIZ_FORMAT_OPTIONS = ["주관식", "객관식"];
 const DEFAULT_QUIZ_SIZE = 30;
 const DEFAULT_QUIZ_MINUTES = 10;
 const DEFAULT_QUIZ_FORMAT = "주관식";
+const MEANING_DISPLAY_OPTIONS = ["표시하기", "표시하지 않기"];
+const DEFAULT_MEANING_DISPLAY = "표시하기";
 const MIN_QUIZ_MINUTES = 1;
 const MAX_QUIZ_MINUTES = 100;
 const MAX_QUIZ_HINT_LETTERS = 3;
@@ -240,6 +242,17 @@ function defaultQuizEnv() {
   };
 }
 
+function defaultSentenceQuizEnv() {
+  return {
+    ...defaultQuizEnv(),
+    meaningDisplay: DEFAULT_MEANING_DISPLAY,
+  };
+}
+
+function parseMeaningDisplay(value) {
+  return MEANING_DISPLAY_OPTIONS.includes(value) ? value : DEFAULT_MEANING_DISPLAY;
+}
+
 function parseQuizEnv(raw, keys) {
   const defaults = defaultQuizEnv();
   if (!raw) return defaults;
@@ -298,6 +311,7 @@ function toFirebaseSettings(current) {
     sentence_test_item_count: sentence.quizSize,
     sentence_test_time_duration: sentence.quizMinutes,
     sentence_test_type: sentence.quizFormat,
+    sentence_test_meaning_display: parseMeaningDisplay(sentence.meaningDisplay),
   };
 }
 
@@ -308,11 +322,14 @@ function fromFirebaseSettings(raw) {
       minutes: "test_time_duration",
       format: "test_type",
     }),
-    sentence: parseQuizEnv(raw, {
-      count: "sentence_test_item_count",
-      minutes: "sentence_test_time_duration",
-      format: "sentence_test_type",
-    }),
+    sentence: {
+      ...parseQuizEnv(raw, {
+        count: "sentence_test_item_count",
+        minutes: "sentence_test_time_duration",
+        format: "sentence_test_type",
+      }),
+      meaningDisplay: parseMeaningDisplay(raw?.sentence_test_meaning_display),
+    },
   };
 }
 
@@ -321,7 +338,12 @@ function wordQuizSettings() {
 }
 
 function sentenceQuizSettings() {
-  return settings.sentence || defaultQuizEnv();
+  const env = settings.sentence || defaultSentenceQuizEnv();
+  return {
+    ...defaultSentenceQuizEnv(),
+    ...env,
+    meaningDisplay: parseMeaningDisplay(env.meaningDisplay),
+  };
 }
 
 function toFirebaseSentenceExam(record) {
@@ -735,7 +757,7 @@ function sortSentences(list) {
 function loadSettings() {
   return {
     word: defaultQuizEnv(),
-    sentence: defaultQuizEnv(),
+    sentence: defaultSentenceQuizEnv(),
   };
 }
 
@@ -1047,12 +1069,44 @@ function renderSentenceView(view) {
   renderSentenceRecords();
 }
 
-function sentencePromptHtml(english) {
-  return escapeHtml(String(english || "")).replace(/\[[^\]]*\]/g, (match) => {
-    const answerLength = Math.max(0, match.length - 2);
-    const spaces = "&nbsp;".repeat(answerLength + 1);
-    return `<span class="quiz-blank">[${spaces}]</span>`;
-  });
+function sentenceBlankAnswers(english, fallbackAnswer = "") {
+  const blanks = [...String(english || "").matchAll(/\[([^\]]*)\]/g)].map((match) => match[1]);
+  if (blanks.length) return blanks;
+  const fallback = String(fallbackAnswer || "");
+  return fallback ? [fallback] : [];
+}
+
+function maxSentenceHintLetters(english, fallbackAnswer = "") {
+  const sources = sentenceBlankAnswers(english, fallbackAnswer);
+  if (!sources.length) return 0;
+  return Math.min(MAX_QUIZ_HINT_LETTERS, Math.max(...sources.map((item) => item.length)));
+}
+
+function sentenceBlankHtml(inner, fallbackAnswer, hintLevel) {
+  const source = inner || String(fallbackAnswer || "");
+  const width = Math.max(inner.length, source.length) + 1;
+  const revealed = Math.max(0, Math.min(Number(hintLevel) || 0, MAX_QUIZ_HINT_LETTERS, source.length));
+  const hint = source.slice(0, revealed);
+  const pad = Math.max(0, width - hint.length);
+  return `<span class="quiz-blank">[${escapeHtml(hint)}${"&nbsp;".repeat(pad)}]</span>`;
+}
+
+function sentencePromptHtml(english, hintLevel = 0, fallbackAnswer = "") {
+  const source = String(english || "");
+  let html = "";
+  let lastIndex = 0;
+  const blanks = /\[([^\]]*)\]/g;
+  let match = blanks.exec(source);
+  if (!match) return escapeHtml(source);
+
+  while (match) {
+    html += escapeHtml(source.slice(lastIndex, match.index));
+    html += sentenceBlankHtml(match[1], fallbackAnswer, hintLevel);
+    lastIndex = match.index + match[0].length;
+    match = blanks.exec(source);
+  }
+  html += escapeHtml(source.slice(lastIndex));
+  return html;
 }
 
 function isCorrectSentenceAnswer(userAnswer, answer) {
@@ -1112,6 +1166,8 @@ function startSentenceQuiz(group = DEFAULT_SENTENCE_GROUP) {
     startedAt: Date.now(),
     timeLimitMs: quizEnv.quizMinutes * 60 * 1000,
     format: quizEnv.quizFormat,
+    meaningDisplay: quizEnv.meaningDisplay,
+    hintLevel: 0,
     group: selectedGroup,
   };
   renderSentenceQuiz();
@@ -1141,8 +1197,15 @@ function renderSentenceQuiz() {
     </div>
     <div class="progress-track"><div class="progress-bar" style="width: ${(step / total) * 100}%"></div></div>
     <p class="lede">빈칸에 알맞은 답을 입력한 뒤 확인을 누르세요. 모르면 모름을 누르세요.</p>
-    <div class="quiz-sentence">${sentencePromptHtml(current.english)}</div>
-    <p class="quiz-sentence-meaning">${escapeHtml(current.meaning)}</p>
+    <div class="quiz-sentence">${sentencePromptHtml(current.english, quiz.hintLevel, current.answer)}</div>
+    ${
+      parseMeaningDisplay(quiz.meaningDisplay) === "표시하기"
+        ? `<p class="quiz-sentence-meaning">${escapeHtml(current.meaning)}</p>`
+        : ""
+    }
+    <div class="quiz-hint-row">
+      <button type="button" class="btn secondary" id="hintBtn">힌트 보기</button>
+    </div>
     <form id="quizForm">
       <div class="quiz-input-row">
         <div>
@@ -1177,6 +1240,35 @@ function renderSentenceQuiz() {
     submitSentenceAnswer("모름", true);
   });
 
+  const hintBtn = document.getElementById("hintBtn");
+  if (hintBtn) {
+    hintBtn.addEventListener("click", revealSentenceQuizHint);
+    updateSentenceQuizHintUi();
+  }
+
+  document.getElementById("sentenceAnswerInput")?.focus();
+}
+
+function updateSentenceQuizHintUi() {
+  if (!quiz || quiz.kind !== "sentence") return;
+  const current = quiz.questions[quiz.index];
+  const level = quiz.hintLevel || 0;
+  const max = maxSentenceHintLetters(current.english, current.answer);
+  const sentenceEl = document.querySelector(".quiz-sentence");
+  const hintBtn = document.getElementById("hintBtn");
+  if (sentenceEl) sentenceEl.innerHTML = sentencePromptHtml(current.english, level, current.answer);
+  if (!hintBtn) return;
+  hintBtn.textContent = level === 0 ? "힌트 보기" : "힌트 더보기";
+  hintBtn.disabled = max === 0 || level >= max;
+}
+
+function revealSentenceQuizHint() {
+  if (!quiz || quiz.expired || quiz.kind !== "sentence") return;
+  const current = quiz.questions[quiz.index];
+  const max = maxSentenceHintLetters(current.english, current.answer);
+  if ((quiz.hintLevel || 0) >= max) return;
+  quiz.hintLevel = (quiz.hintLevel || 0) + 1;
+  updateSentenceQuizHintUi();
   document.getElementById("sentenceAnswerInput")?.focus();
 }
 
@@ -1197,6 +1289,7 @@ function submitSentenceAnswer(userAnswer, unknown = false) {
 
   if (quiz.index < quiz.questions.length - 1) {
     quiz.index += 1;
+    quiz.hintLevel = 0;
     renderSentenceQuiz();
     return;
   }
@@ -1784,13 +1877,16 @@ function quizEnvError(env) {
     return `시험 시간은 ${MIN_QUIZ_MINUTES}분 이상 ${MAX_QUIZ_MINUTES}분 이하로 입력해 주세요.`;
   }
   if (!QUIZ_FORMAT_OPTIONS.includes(env.quizFormat)) return "문제 형식을 다시 선택해 주세요.";
+  if (env.meaningDisplay != null && !MEANING_DISPLAY_OPTIONS.includes(env.meaningDisplay)) {
+    return "뜻 표시를 다시 선택해 주세요.";
+  }
   return "";
 }
 
 function renderSettings() {
   homeTab = "settings";
   const word = wordQuizSettings();
-  const sentence = settings.sentence || defaultQuizEnv();
+  const sentence = sentenceQuizSettings();
   updateHeader("환경 설정");
   app.innerHTML = `
     ${homeTabsHtml()}
@@ -1810,6 +1906,15 @@ function renderSettings() {
           sentence,
           "주관식은 답을 직접 입력하고, 객관식은 5지선다에서 고릅니다.",
         )}
+        <div>
+          <label for="sentenceMeaningDisplay">뜻 표시</label>
+          <select id="sentenceMeaningDisplay" name="sentenceMeaningDisplay">
+            ${MEANING_DISPLAY_OPTIONS.map(
+              (option) =>
+                `<option value="${option}" ${option === sentence.meaningDisplay ? "selected" : ""}>${option}</option>`,
+            ).join("")}
+          </select>
+        </div>
       </fieldset>
       <div class="modal-actions">
         <button type="submit" class="btn">저장</button>
@@ -1821,7 +1926,10 @@ function renderSettings() {
   document.getElementById("settingsForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const wordEnv = readQuizEnvFromForm(event.target, "word");
-    const sentenceEnv = readQuizEnvFromForm(event.target, "sentence");
+    const sentenceEnv = {
+      ...readQuizEnvFromForm(event.target, "sentence"),
+      meaningDisplay: event.target.sentenceMeaningDisplay.value,
+    };
     const error = quizEnvError(wordEnv) || quizEnvError(sentenceEnv);
     if (error) {
       alert(error);
