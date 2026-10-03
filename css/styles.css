@@ -128,6 +128,37 @@ main {
   font-family: "Fraunces", serif;
 }
 
+.home-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 28px;
+  padding: 6px;
+  background: #efe7d8;
+  border-radius: 999px;
+}
+
+.home-tab {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 10px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.home-tab.is-active {
+  background: #fff;
+  color: var(--navy);
+  font-weight: 700;
+  box-shadow: 0 8px 18px rgba(48, 36, 18, 0.08);
+}
+
 .hero h1 {
   margin: 0 0 12px;
   font-size: clamp(32px, 5vw, 48px);
@@ -249,11 +280,28 @@ main {
 .settings-form {
   display: grid;
   gap: 20px;
-  max-width: 420px;
+  max-width: 520px;
   padding: 24px;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 18px;
+}
+
+.settings-group {
+  display: grid;
+  gap: 20px;
+  margin: 0;
+  padding: 18px 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #faf8f4;
+}
+
+.settings-group legend {
+  padding: 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--navy);
 }
 
 .settings-hint {
@@ -612,6 +660,31 @@ th {
   word-break: keep-all;
 }
 
+.quiz-sentence {
+  font-family: "Fraunces", serif;
+  font-size: clamp(24px, 4vw, 40px);
+  line-height: 1.45;
+  margin: 8px 0 16px;
+  word-break: break-word;
+}
+
+.quiz-blank {
+  display: inline;
+  padding: 0 2px;
+  border-bottom: 3px solid var(--navy);
+  color: var(--navy);
+  font-weight: 700;
+  white-space: pre;
+}
+
+.quiz-sentence-meaning {
+  margin: 0 0 28px;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1.6;
+  word-break: keep-all;
+}
+
 .quiz-hint-row {
   display: flex;
   align-items: center;
@@ -755,6 +828,22 @@ th {
   max-width: calc(100vw - 40px);
 }
 
+.modal:has(.sentence-form) {
+  width: min(640px, 100%);
+}
+
+.sentence-input {
+  min-height: 96px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.sentence-text {
+  max-width: 320px;
+  white-space: normal;
+  word-break: break-word;
+}
+
 .wrong-note-wrap {
   overflow-x: auto;
 }
@@ -871,6 +960,10 @@ th {
   .app-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .home-tabs {
+    width: 100%;
   }
 
   .menu-grid,

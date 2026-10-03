@@ -21,6 +21,26 @@ const DEFAULT_PAGE_SIZE = 20;
 const WORD_GROUPS = ["Intensive Reading Book 단어", "교과서 영어 단어", "VOCA 영어 단어"];
 const DEFAULT_WORD_GROUP = WORD_GROUPS[0];
 const WRONG_WORD_QUIZ = "오답 단어";
+const SENTENCE_GROUPS = ["Intensive Reading Book 영어 문장", "교과서 영어 문장", "VOCA 영어 문장"];
+const DEFAULT_SENTENCE_GROUP = SENTENCE_GROUPS[0];
+const SENTENCE_GROUP_ALIASES = {
+  "Intensive Reading Book 문장": "Intensive Reading Book 영어 문장",
+  "Internsive Reading Book 영어 문장": "Intensive Reading Book 영어 문장",
+  "교과서 문장": "교과서 영어 문장",
+  "VOCA 문장": "VOCA 영어 문장",
+};
+const SENTENCE_SORT_OPTIONS = [
+  { id: "alpha", label: "알파벳순" },
+  { id: "rate", label: "정답율순" },
+  { id: "date", label: "등록일순" },
+];
+
+const HOME_TABS = [
+  { id: "word", label: "영어 단어 시험" },
+  { id: "sentence", label: "영어 문장 시험" },
+  { id: "settings", label: "환경 설정" },
+];
+const DEFAULT_HOME_TAB = "word";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAsWSpkljhwHSURAcgWna_H3gSCDyGF01Y",
@@ -37,6 +57,8 @@ const DB_PATHS = {
   words: "word_list",
   exams: "exam_list",
   settings: "conf-env",
+  sentences: "sentence_list",
+  sentenceExams: "sentence_exam_list",
 };
 
 const app = document.getElementById("app");
@@ -51,6 +73,8 @@ let firebaseReady = false;
 let currentUser = null;
 let words = [];
 let records = [];
+let sentences = [];
+let sentenceRecords = [];
 let partsOfSpeech = loadPartsOfSpeech();
 let quiz = null;
 let quizTimerId = null;
@@ -60,6 +84,12 @@ let wordPageSize = loadPageSize();
 let wordGroup = DEFAULT_WORD_GROUP;
 let settings = loadSettings();
 let selectedWordIds = new Set();
+let homeTab = DEFAULT_HOME_TAB;
+let sentenceGroup = DEFAULT_SENTENCE_GROUP;
+let sentencePage = 1;
+let sentencePageSize = loadPageSize();
+let sentenceSort = "date";
+let selectedSentenceIds = new Set();
 
 document.getElementById("homeBtn").addEventListener("click", () => {
   if (!currentUser) {
@@ -202,31 +232,133 @@ function fromFirebaseExam(item) {
   };
 }
 
-function toFirebaseSettings(current) {
+function defaultQuizEnv() {
   return {
-    test_item_count: current.quizSize,
-    test_time_duration: current.quizMinutes,
-    test_type: current.quizFormat,
-  };
-}
-
-function fromFirebaseSettings(raw) {
-  const defaults = {
     quizSize: DEFAULT_QUIZ_SIZE,
     quizMinutes: DEFAULT_QUIZ_MINUTES,
     quizFormat: DEFAULT_QUIZ_FORMAT,
   };
+}
+
+function parseQuizEnv(raw, keys) {
+  const defaults = defaultQuizEnv();
   if (!raw) return defaults;
-  const quizSize = QUIZ_SIZE_OPTIONS.includes(Number(raw.test_item_count))
-    ? Number(raw.test_item_count)
+  const quizSize = QUIZ_SIZE_OPTIONS.includes(Number(raw[keys.count]))
+    ? Number(raw[keys.count])
     : defaults.quizSize;
-  const minutes = Number(raw.test_time_duration);
+  const minutes = Number(raw[keys.minutes]);
   const quizMinutes =
     Number.isInteger(minutes) && minutes >= MIN_QUIZ_MINUTES && minutes <= MAX_QUIZ_MINUTES
       ? minutes
       : defaults.quizMinutes;
-  const quizFormat = QUIZ_FORMAT_OPTIONS.includes(raw.test_type) ? raw.test_type : defaults.quizFormat;
+  const quizFormat = QUIZ_FORMAT_OPTIONS.includes(raw[keys.format]) ? raw[keys.format] : defaults.quizFormat;
   return { quizSize, quizMinutes, quizFormat };
+}
+
+function toFirebaseSentence(item) {
+  return {
+    Group: item.group,
+    eng_sentence: item.english,
+    kor_mean: item.meaning,
+    answer: item.answer,
+    date: item.createdAt || Date.now(),
+    rate: wordRate(item),
+    count: Number(item.count) || 0,
+    ans_count: Number(item.ansCount) || 0,
+  };
+}
+
+function resolveSentenceGroup(group) {
+  const raw = String(group || "").trim();
+  if (SENTENCE_GROUPS.includes(raw)) return raw;
+  return SENTENCE_GROUP_ALIASES[raw] || DEFAULT_SENTENCE_GROUP;
+}
+
+function fromFirebaseSentence(item) {
+  return {
+    id: crypto.randomUUID(),
+    english: String(item.eng_sentence || item.english || "").trim(),
+    meaning: String(item.kor_mean || item.meaning || "").trim(),
+    answer: String(item.answer || "").trim(),
+    group: resolveSentenceGroup(item.Group || item.group),
+    createdAt: Number(item.date) || Date.now(),
+    rate: Number(item.rate) || 0,
+    count: Number(item.count) || 0,
+    ansCount: Number(item.ans_count) || 0,
+  };
+}
+
+function toFirebaseSettings(current) {
+  const word = current.word || defaultQuizEnv();
+  const sentence = current.sentence || defaultQuizEnv();
+  return {
+    test_item_count: word.quizSize,
+    test_time_duration: word.quizMinutes,
+    test_type: word.quizFormat,
+    sentence_test_item_count: sentence.quizSize,
+    sentence_test_time_duration: sentence.quizMinutes,
+    sentence_test_type: sentence.quizFormat,
+  };
+}
+
+function fromFirebaseSettings(raw) {
+  return {
+    word: parseQuizEnv(raw, {
+      count: "test_item_count",
+      minutes: "test_time_duration",
+      format: "test_type",
+    }),
+    sentence: parseQuizEnv(raw, {
+      count: "sentence_test_item_count",
+      minutes: "sentence_test_time_duration",
+      format: "sentence_test_type",
+    }),
+  };
+}
+
+function wordQuizSettings() {
+  return settings.word || defaultQuizEnv();
+}
+
+function sentenceQuizSettings() {
+  return settings.sentence || defaultQuizEnv();
+}
+
+function toFirebaseSentenceExam(record) {
+  return {
+    test_date: record.date,
+    test_duration: Number(record.duration) || 0,
+    sentence_group: record.group || DEFAULT_SENTENCE_GROUP,
+    test_items: (record.answers || []).map((item) => ({
+      eng_sentence: item.english,
+      kor_mean: item.meaning,
+      answer: item.answer || "",
+      correct: item.correct ? "정답" : "오답",
+      user_answer: item.userAnswer || "",
+      sentence_group: resolveSentenceGroup(item.group || record.group),
+    })),
+  };
+}
+
+function fromFirebaseSentenceExam(item) {
+  const answers = toList(item.test_items).map((entry) => ({
+    english: entry.eng_sentence || "",
+    meaning: entry.kor_mean || "",
+    answer: entry.answer || "",
+    userAnswer: entry.user_answer || entry.answer_input || "",
+    correct: isStoredCorrect(entry.correct),
+    group: resolveSentenceGroup(entry.sentence_group || item.sentence_group),
+  }));
+  return {
+    id: crypto.randomUUID(),
+    date: Number(item.test_date) || Date.now(),
+    duration: Number(item.test_duration) || 0,
+    total: answers.length,
+    correct: answers.filter((answer) => answer.correct).length,
+    group: resolveSentenceGroup(item.sentence_group),
+    answers,
+    kind: "sentence",
+  };
 }
 
 async function dbGet(path) {
@@ -266,6 +398,34 @@ async function persistWords() {
   }
 }
 
+async function saveSentenceList() {
+  if (!isAuthenticated()) return;
+  await dbSet(DB_PATHS.sentences, sentences.map(toFirebaseSentence));
+}
+
+async function persistSentences() {
+  try {
+    await saveSentenceList();
+  } catch (error) {
+    console.error(error);
+    alert("문장 목록을 Firebase에 저장하지 못했습니다.");
+  }
+}
+
+async function saveSentenceExamList() {
+  if (!isAuthenticated()) return;
+  await dbSet(DB_PATHS.sentenceExams, sentenceRecords.map(toFirebaseSentenceExam));
+}
+
+async function persistSentencesAndExams() {
+  try {
+    await Promise.all([saveSentenceList(), saveSentenceExamList()]);
+  } catch (error) {
+    console.error(error);
+    alert("문장 시험 기록을 Firebase에 저장하지 못했습니다.");
+  }
+}
+
 async function persistExamsAndWords() {
   try {
     await Promise.all([saveWordList(), saveExamList()]);
@@ -287,16 +447,22 @@ function renderLoading(message) {
 }
 
 async function loadFromFirebase() {
-  const [rawWords, rawExams, rawSettings] = await Promise.all([
+  const [rawWords, rawExams, rawSettings, rawSentences, rawSentenceExams] = await Promise.all([
     dbGet(DB_PATHS.words),
     dbGet(DB_PATHS.exams),
     dbGet(DB_PATHS.settings),
+    dbGet(DB_PATHS.sentences),
+    dbGet(DB_PATHS.sentenceExams),
   ]);
   words = toList(rawWords)
     .map(fromFirebaseWord)
     .filter((word) => word.english);
   records = toList(rawExams).map(fromFirebaseExam);
   settings = fromFirebaseSettings(rawSettings);
+  sentences = toList(rawSentences)
+    .map(fromFirebaseSentence)
+    .filter((item) => item.english && item.meaning && item.answer);
+  sentenceRecords = toList(rawSentenceExams).map(fromFirebaseSentenceExam);
   collectPartsOfSpeech();
   if (!rawSettings) await saveSettingsToFirebase();
 }
@@ -305,11 +471,15 @@ function resetSessionData() {
   firebaseReady = false;
   words = [];
   records = [];
+  sentences = [];
+  sentenceRecords = [];
   settings = loadSettings();
   selectedWordIds = new Set();
+  selectedSentenceIds = new Set();
   partsOfSpeech = loadPartsOfSpeech();
   stopQuizTimer();
   quiz = null;
+  homeTab = DEFAULT_HOME_TAB;
 }
 
 function updateAuthBar() {
@@ -469,6 +639,8 @@ async function initApp() {
       firebaseReady = false;
       words = [];
       records = [];
+      sentences = [];
+      sentenceRecords = [];
       settings = loadSettings();
       alert("Firebase 데이터를 불러오지 못했습니다. 로그인 상태이지만 데이터를 읽지 못했습니다.");
       renderHome();
@@ -509,11 +681,61 @@ function groupOptions(selected) {
   ).join("");
 }
 
+function sentenceGroupOptions(selected) {
+  return SENTENCE_GROUPS.map(
+    (group) => `<option value="${escapeHtml(group)}" ${group === selected ? "selected" : ""}>${escapeHtml(group)}</option>`,
+  ).join("");
+}
+
+function sentencesInGroup(group) {
+  return sentences.filter((item) => item.group === group);
+}
+
+function createSentence(english, meaning, answer, group) {
+  return {
+    id: crypto.randomUUID(),
+    english: english.trim(),
+    meaning: meaning.trim(),
+    answer: answer.trim(),
+    group: resolveSentenceGroup(group),
+    createdAt: Date.now(),
+    rate: 0,
+    count: 0,
+    ansCount: 0,
+  };
+}
+
+function sentenceBracketAnswers(english) {
+  return [...String(english || "").matchAll(/\[([^\]]+)\]/g)]
+    .map((match) => match[1].trim())
+    .filter(Boolean);
+}
+
+function currentSentenceSortLabel() {
+  return SENTENCE_SORT_OPTIONS.find((option) => option.id === sentenceSort)?.label || "등록일순";
+}
+
+function sortSentences(list) {
+  return [...list].sort((a, b) => {
+    if (sentenceSort === "alpha") {
+      return a.english.localeCompare(b.english, "en", { sensitivity: "base" });
+    }
+    if (sentenceSort === "rate") {
+      const aAcc = getWordAccuracy(a);
+      const bAcc = getWordAccuracy(b);
+      const aRate = aAcc.asked === 0 ? -1 : aAcc.correct / aAcc.asked;
+      const bRate = bAcc.asked === 0 ? -1 : bAcc.correct / bAcc.asked;
+      if (bRate !== aRate) return bRate - aRate;
+      return bAcc.asked - aAcc.asked;
+    }
+    return (b.createdAt || 0) - (a.createdAt || 0);
+  });
+}
+
 function loadSettings() {
   return {
-    quizSize: DEFAULT_QUIZ_SIZE,
-    quizMinutes: DEFAULT_QUIZ_MINUTES,
-    quizFormat: DEFAULT_QUIZ_FORMAT,
+    word: defaultQuizEnv(),
+    sentence: defaultQuizEnv(),
   };
 }
 
@@ -667,10 +889,53 @@ function openModal(title, bodyHtml) {
   modalBackdrop.classList.remove("hidden");
 }
 
+function homeTabsHtml() {
+  return `
+    <nav class="home-tabs" aria-label="메인 메뉴">
+      ${HOME_TABS.map(
+        (tab) => `
+          <button
+            type="button"
+            class="home-tab${homeTab === tab.id ? " is-active" : ""}"
+            data-home-tab="${tab.id}"
+            ${homeTab === tab.id ? 'aria-current="page"' : ""}
+          >
+            ${tab.label}
+          </button>
+        `,
+      ).join("")}
+    </nav>
+  `;
+}
+
+function bindHomeTabs() {
+  app.querySelectorAll("[data-home-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.homeTab === homeTab) return;
+      homeTab = button.dataset.homeTab;
+      renderHome();
+    });
+  });
+}
+
 function renderHome() {
+  if (homeTab === "sentence") {
+    renderSentenceHome();
+    return;
+  }
+  if (homeTab === "settings") {
+    renderSettings();
+    return;
+  }
+  renderWordHome();
+}
+
+function renderWordHome() {
+  homeTab = "word";
   const latest = records[0];
   updateHeader(`단어 ${words.length}개 · 기록 ${records.length}건`);
   app.innerHTML = `
+    ${homeTabsHtml()}
     <section class="hero">
       <h1>오늘 외울 단어를<br />시험으로 점검하세요</h1>
       <p>단어의 뜻을 보고 영어 단어를 입력한 뒤, 결과표와 기록을 바로 확인할 수 있습니다.</p>
@@ -678,8 +943,8 @@ function renderHome() {
     <div class="menu-grid">
       <button class="menu-card" data-view="quiz">
         <span class="menu-index">01</span>
-        <h2>시험 시작</h2>
-        <p>단어 그룹을 고른 뒤 ${settings.quizSize}문항 · ${settings.quizFormat} 시험을 시작합니다.</p>
+        <h2>단어 시험 시작</h2>
+        <p>단어 그룹을 고른 뒤 ${wordQuizSettings().quizSize}문항 · ${wordQuizSettings().quizFormat} 시험을 시작합니다.</p>
       </button>
       <button class="menu-card" data-view="words">
         <span class="menu-index">02</span>
@@ -688,7 +953,7 @@ function renderHome() {
       </button>
       <button class="menu-card" data-view="records">
         <span class="menu-index">03</span>
-        <h2>시험 기록 조회</h2>
+        <h2>단어 시험 기록 조회</h2>
         <p>이전 시험 점수와 오답을 다시 봅니다.</p>
       </button>
     </div>
@@ -699,18 +964,16 @@ function renderHome() {
       </div>
       <div class="stat-card">
         <strong>${records.length}</strong>
-        <span>저장된 시험 기록</span>
+        <span>시험 기록</span>
       </div>
       <div class="stat-card">
         <strong>${latest ? `${latest.correct}/${latest.total}` : "-"}</strong>
         <span>최근 시험 점수</span>
       </div>
     </div>
-    <div class="home-settings">
-      <button type="button" class="btn secondary" id="openSettings">환경 설정</button>
-    </div>
   `;
 
+  bindHomeTabs();
   app.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
       const view = button.dataset.view;
@@ -719,72 +982,852 @@ function renderHome() {
       if (view === "records") renderRecords();
     });
   });
-  document.getElementById("openSettings").addEventListener("click", renderSettings);
+}
+
+function renderSentenceHome() {
+  homeTab = "sentence";
+  const sentenceEnv = sentenceQuizSettings();
+  const latest = sentenceRecords[0];
+  updateHeader(`문장 ${sentences.length}개 · 기록 ${sentenceRecords.length}건`);
+  app.innerHTML = `
+    ${homeTabsHtml()}
+    <section class="hero">
+      <h1>오늘 외울 문장을<br />시험으로 점검하세요</h1>
+      <p>영어 문장을 등록한 뒤 시험으로 확인하고, 결과표와 기록을 바로 볼 수 있습니다.</p>
+    </section>
+    <div class="menu-grid">
+      <button class="menu-card" data-view="sentence-quiz">
+        <span class="menu-index">01</span>
+        <h2>문장 시험 시작</h2>
+        <p>${sentenceEnv.quizSize}문항 · ${sentenceEnv.quizFormat} 문장 시험을 시작합니다.</p>
+      </button>
+      <button class="menu-card" data-view="sentence-manage">
+        <span class="menu-index">02</span>
+        <h2>문장 관리</h2>
+        <p>문장 목록을 추가, 수정, 삭제합니다.</p>
+      </button>
+      <button class="menu-card" data-view="sentence-records">
+        <span class="menu-index">03</span>
+        <h2>문장 시험 기록 조회</h2>
+        <p>이전 문장 시험 점수와 오답을 다시 봅니다.</p>
+      </button>
+    </div>
+    <div class="stats">
+      <div class="stat-card">
+        <strong>${sentences.length}</strong>
+        <span>등록된 문장</span>
+      </div>
+      <div class="stat-card">
+        <strong>${sentenceRecords.length}</strong>
+        <span>시험 기록</span>
+      </div>
+      <div class="stat-card">
+        <strong>${latest ? `${latest.correct}/${latest.total}` : "-"}</strong>
+        <span>최근 시험 점수</span>
+      </div>
+    </div>
+  `;
+
+  bindHomeTabs();
+  app.querySelectorAll("[data-view]").forEach((button) => {
+    button.addEventListener("click", () => renderSentenceView(button.dataset.view));
+  });
+}
+
+function renderSentenceView(view) {
+  homeTab = "sentence";
+  if (view === "sentence-manage") {
+    renderSentences();
+    return;
+  }
+  if (view === "sentence-quiz") {
+    renderSentenceQuizGroupPicker();
+    return;
+  }
+  renderSentenceRecords();
+}
+
+function sentencePromptHtml(english) {
+  return escapeHtml(String(english || "")).replace(/\[[^\]]*\]/g, (match) => {
+    const answerLength = Math.max(0, match.length - 2);
+    const spaces = "&nbsp;".repeat(answerLength + 1);
+    return `<span class="quiz-blank">[${spaces}]</span>`;
+  });
+}
+
+function isCorrectSentenceAnswer(userAnswer, answer) {
+  const expected = String(answer || "").trim();
+  const input = String(userAnswer || "").trim();
+  if (!expected || !input) return false;
+  return isCorrectEnglish(input, expected) || isCorrectAnswer(input, expected);
+}
+
+function renderSentenceQuizGroupPicker() {
+  homeTab = "sentence";
+  updateHeader("문장 시험 시작 · 그룹 선택");
+  app.innerHTML = `
+    <div class="toolbar">
+      <h1 class="section-title">문장 시험 시작</h1>
+      <button class="btn secondary" id="backHome">홈으로</button>
+    </div>
+    <p class="lede">시험을 볼 문장 그룹을 선택하세요.</p>
+    <div class="group-picker">
+      ${SENTENCE_GROUPS.map((group) => {
+        const count = sentencesInGroup(group).length;
+        return `
+          <button type="button" class="menu-card" data-group="${escapeHtml(group)}" ${count === 0 ? "disabled" : ""}>
+            <span class="menu-index">${count}개</span>
+            <h2>${escapeHtml(group)}</h2>
+            <p>${count === 0 ? "등록된 문장이 없습니다." : "이 그룹의 문장으로 시험을 시작합니다."}</p>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+
+  document.getElementById("backHome").addEventListener("click", renderHome);
+  app.querySelectorAll("[data-group]").forEach((button) => {
+    button.addEventListener("click", () => startSentenceQuiz(button.dataset.group));
+  });
+}
+
+function startSentenceQuiz(group = DEFAULT_SENTENCE_GROUP) {
+  homeTab = "sentence";
+  const selectedGroup = resolveSentenceGroup(group);
+  const pool = sentencesInGroup(selectedGroup);
+  if (pool.length === 0) {
+    alert("선택한 그룹에 등록된 문장이 없습니다. 먼저 문장을 추가해 주세요.");
+    sentenceGroup = selectedGroup;
+    renderSentences();
+    return;
+  }
+
+  const quizEnv = sentenceQuizSettings();
+  const questions = shuffle(pool).slice(0, Math.min(quizEnv.quizSize, pool.length));
+  quiz = {
+    kind: "sentence",
+    questions,
+    index: 0,
+    answers: [],
+    startedAt: Date.now(),
+    timeLimitMs: quizEnv.quizMinutes * 60 * 1000,
+    format: quizEnv.quizFormat,
+    group: selectedGroup,
+  };
+  renderSentenceQuiz();
+  startQuizTimer();
+}
+
+function renderSentenceQuiz() {
+  const current = quiz.questions[quiz.index];
+  const total = quiz.questions.length;
+  const step = quiz.index + 1;
+  updateHeader(`시험 진행 중 · ${quiz.group} · ${step} / ${total}`);
+
+  app.innerHTML = `
+    <div class="toolbar">
+      <div class="quiz-title-row">
+        <h1 class="section-title">문장 시험 시작</h1>
+        <div class="quiz-times">
+          <span class="quiz-total-time">총 시험 시간: ${formatElapsed(quiz.timeLimitMs)}</span>
+          <span class="quiz-timer" id="quizTimer">시험 경과 시간: ${formatElapsedPrecise(Date.now() - quiz.startedAt)}</span>
+        </div>
+      </div>
+      <button class="btn secondary" id="cancelQuiz">그만두기</button>
+    </div>
+    <div class="quiz-progress">
+      <span>${step}번째 문제</span>
+      <span>총 ${total}문항</span>
+    </div>
+    <div class="progress-track"><div class="progress-bar" style="width: ${(step / total) * 100}%"></div></div>
+    <p class="lede">빈칸에 알맞은 답을 입력한 뒤 확인을 누르세요. 모르면 모름을 누르세요.</p>
+    <div class="quiz-sentence">${sentencePromptHtml(current.english)}</div>
+    <p class="quiz-sentence-meaning">${escapeHtml(current.meaning)}</p>
+    <form id="quizForm">
+      <div class="quiz-input-row">
+        <div>
+          <label for="sentenceAnswerInput">정답</label>
+          <input id="sentenceAnswerInput" name="answer" autocomplete="off" placeholder="정답을 입력하세요" />
+        </div>
+        <button class="btn" type="submit">확인</button>
+        <button class="btn secondary" type="button" id="unknownBtn">모름</button>
+      </div>
+    </form>
+  `;
+
+  document.getElementById("cancelQuiz").addEventListener("click", () => {
+    if (confirm("시험을 중단하고 메인 화면으로 돌아갈까요?")) {
+      stopQuizTimer();
+      quiz = null;
+      renderHome();
+    }
+  });
+
+  document.getElementById("quizForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const selected = String(new FormData(event.target).get("answer") || "").trim();
+    if (!selected) {
+      submitSentenceAnswer("모름", true);
+      return;
+    }
+    submitSentenceAnswer(selected);
+  });
+
+  document.getElementById("unknownBtn").addEventListener("click", () => {
+    submitSentenceAnswer("모름", true);
+  });
+
+  document.getElementById("sentenceAnswerInput")?.focus();
+}
+
+function submitSentenceAnswer(userAnswer, unknown = false) {
+  if (!quiz || quiz.expired || quiz.kind !== "sentence") return;
+  const current = quiz.questions[quiz.index];
+  const answer = unknown ? "모름" : userAnswer.trim();
+  const correct = !unknown && Boolean(answer) && isCorrectSentenceAnswer(answer, current.answer);
+  quiz.answers.push({
+    sentenceId: current.id,
+    english: current.english,
+    meaning: current.meaning,
+    answer: current.answer,
+    group: current.group || "",
+    userAnswer: answer,
+    correct,
+  });
+
+  if (quiz.index < quiz.questions.length - 1) {
+    quiz.index += 1;
+    renderSentenceQuiz();
+    return;
+  }
+
+  finishQuiz();
+}
+
+function applySentenceQuizStats(answers, group) {
+  for (const answer of answers) {
+    const itemGroup = resolveSentenceGroup(answer.group || group);
+    const item =
+      sentences.find((sentence) => sentence.id === answer.sentenceId) ||
+      sentences.find(
+        (sentence) =>
+          sentence.group === itemGroup && sentence.english.toLowerCase() === String(answer.english || "").toLowerCase(),
+      );
+    if (!item) continue;
+    item.count = (Number(item.count) || 0) + 1;
+    if (answer.correct) item.ansCount = (Number(item.ansCount) || 0) + 1;
+    item.rate = wordRate(item);
+  }
+}
+
+function renderSentences() {
+  homeTab = "sentence";
+  selectedSentenceIds = new Set();
+  updateHeader(`문장 관리 · ${sentenceGroup} · ${sentencesInGroup(sentenceGroup).length}개`);
+  app.innerHTML = `
+    <div class="toolbar">
+      <h1 class="section-title">문장 관리</h1>
+      <div class="actions">
+        <button class="btn" id="openAddSentence">문장 추가</button>
+        <button class="btn secondary" id="backHome">홈으로</button>
+      </div>
+    </div>
+    <label class="group-select-wrap" for="sentenceGroupSelect">
+      문장 그룹
+      <select id="sentenceGroupSelect">${sentenceGroupOptions(sentenceGroup)}</select>
+    </label>
+    <div class="search-row">
+      <input id="sentenceSearch" placeholder="문장, 뜻 또는 정답 검색" />
+      <label class="page-size-wrap" for="sentencePageSizeInput">
+        페이지당
+        <input id="sentencePageSizeInput" type="number" min="1" max="200" value="${sentencePageSize}" />
+        개
+      </label>
+      <div class="sort-wrap">
+        <button type="button" class="btn secondary" id="sortBtn">정렬 · ${currentSentenceSortLabel()}</button>
+        <div class="sort-panel hidden" id="sortPanel">
+          ${SENTENCE_SORT_OPTIONS.map(
+            (option) => `
+              <button type="button" class="sort-option ${option.id === sentenceSort ? "active" : ""}" data-sort="${option.id}">
+                ${option.label}
+              </button>
+            `,
+          ).join("")}
+        </div>
+      </div>
+    </div>
+    <div id="sentenceTable"></div>
+  `;
+
+  document.getElementById("backHome").addEventListener("click", renderHome);
+  document.getElementById("openAddSentence").addEventListener("click", openAddSentenceModal);
+  document.getElementById("sentenceGroupSelect").addEventListener("change", (event) => {
+    sentenceGroup = event.target.value;
+    sentencePage = 1;
+    selectedSentenceIds = new Set();
+    drawSentenceTable(document.getElementById("sentenceSearch").value);
+  });
+
+  const search = document.getElementById("sentenceSearch");
+  const pageSizeInput = document.getElementById("sentencePageSizeInput");
+  const sortBtn = document.getElementById("sortBtn");
+  const sortPanel = document.getElementById("sortPanel");
+
+  search.addEventListener("input", () => {
+    sentencePage = 1;
+    drawSentenceTable(search.value);
+  });
+  pageSizeInput.addEventListener("change", () => {
+    const nextSize = Number(pageSizeInput.value);
+    if (!Number.isInteger(nextSize) || nextSize < 1) {
+      pageSizeInput.value = String(sentencePageSize);
+      return;
+    }
+    sentencePageSize = Math.min(nextSize, 200);
+    pageSizeInput.value = String(sentencePageSize);
+    sentencePage = 1;
+    drawSentenceTable(search.value);
+  });
+  sortBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    sortPanel.classList.toggle("hidden");
+  });
+  sortPanel.querySelectorAll("[data-sort]").forEach((option) => {
+    option.addEventListener("click", (event) => {
+      event.stopPropagation();
+      sentenceSort = option.dataset.sort;
+      sortBtn.textContent = `정렬 · ${currentSentenceSortLabel()}`;
+      sortPanel.querySelectorAll("[data-sort]").forEach((item) => {
+        item.classList.toggle("active", item.dataset.sort === sentenceSort);
+      });
+      sortPanel.classList.add("hidden");
+      sentencePage = 1;
+      drawSentenceTable(search.value);
+    });
+  });
+  drawSentenceTable("");
+}
+
+function drawSentenceTable(keyword) {
+  const grouped = sentencesInGroup(sentenceGroup);
+  updateHeader(`문장 관리 · ${sentenceGroup} · ${grouped.length}개`);
+  const query = keyword.trim().toLowerCase();
+  const filtered = sortSentences(
+    grouped.filter(
+      (item) =>
+        item.english.toLowerCase().includes(query) ||
+        item.meaning.toLowerCase().includes(query) ||
+        item.answer.toLowerCase().includes(query),
+    ),
+  );
+
+  const target = document.getElementById("sentenceTable");
+  if (!target) return;
+  if (filtered.length === 0) {
+    target.innerHTML = `<div class="empty-state">표시할 문장이 없습니다.</div>`;
+    return;
+  }
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / sentencePageSize));
+  sentencePage = Math.min(Math.max(1, sentencePage), totalPages);
+  const start = (sentencePage - 1) * sentencePageSize;
+  const pageItems = filtered.slice(start, start + sentencePageSize);
+  const atFirst = sentencePage === 1;
+  const atLast = sentencePage === totalPages;
+
+  target.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="col-num">번호</th>
+            <th>문장</th>
+            <th>뜻</th>
+            <th>정답</th>
+            <th>정답율</th>
+            <th class="col-manage">
+              <div class="manage-head">
+                <span>관리</span>
+                <button type="button" class="icon-btn" id="bulkDeleteBtn" ${selectedSentenceIds.size === 0 ? "disabled" : ""}>
+                  선택 삭제${selectedSentenceIds.size ? ` (${selectedSentenceIds.size})` : ""}
+                </button>
+              </div>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          ${pageItems
+            .map(
+              (item, index) => `
+                <tr>
+                  <td class="col-num">${start + index + 1}</td>
+                  <td class="sentence-text">${escapeHtml(item.english)}</td>
+                  <td>${escapeHtml(item.meaning)}</td>
+                  <td>${escapeHtml(item.answer)}</td>
+                  <td class="col-rate">${formatAccuracy(item)}</td>
+                  <td>
+                    <div class="actions">
+                      <button class="icon-btn" data-edit="${item.id}">변경</button>
+                      <button class="icon-btn" data-delete="${item.id}">삭제</button>
+                      <input
+                        class="word-check"
+                        type="checkbox"
+                        data-select="${item.id}"
+                        aria-label="${escapeHtml(item.english)} 선택"
+                        ${selectedSentenceIds.has(item.id) ? "checked" : ""}
+                      />
+                    </div>
+                  </td>
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button type="button" class="btn secondary" data-page="first" ${atFirst ? "disabled" : ""}>처음으로</button>
+      <button type="button" class="btn secondary" data-page="prev" ${atFirst ? "disabled" : ""}>앞으로</button>
+      <span class="pager-status">${sentencePage} / ${totalPages} 페이지 · ${filtered.length}개</span>
+      <button type="button" class="btn secondary" data-page="next" ${atLast ? "disabled" : ""}>뒤로</button>
+      <button type="button" class="btn secondary" data-page="last" ${atLast ? "disabled" : ""}>끝으로</button>
+    </div>
+  `;
+
+  target.querySelectorAll("[data-edit]").forEach((button) => {
+    button.addEventListener("click", () => openEditSentenceModal(button.dataset.edit));
+  });
+  target.querySelectorAll("[data-delete]").forEach((button) => {
+    button.addEventListener("click", () => deleteSentence(button.dataset.delete));
+  });
+  target.querySelectorAll("[data-select]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedSentenceIds.add(checkbox.dataset.select);
+      else selectedSentenceIds.delete(checkbox.dataset.select);
+      updateSentenceBulkDeleteButton();
+    });
+  });
+  document.getElementById("bulkDeleteBtn")?.addEventListener("click", () => deleteSelectedSentences(keyword));
+  target.querySelectorAll("[data-page]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.page === "first") sentencePage = 1;
+      if (button.dataset.page === "prev") sentencePage -= 1;
+      if (button.dataset.page === "next") sentencePage += 1;
+      if (button.dataset.page === "last") sentencePage = totalPages;
+      drawSentenceTable(keyword);
+    });
+  });
+}
+
+function openAddSentenceModal() {
+  openModal(
+    `문장 추가 · ${sentenceGroup}`,
+    `
+      <p class="import-hint">선택한 그룹(${escapeHtml(sentenceGroup)})에 문장이 추가됩니다.</p>
+      <div class="import-row">
+        <button type="button" class="btn secondary" id="importSentenceFileBtn">파일로 추가</button>
+        <input id="importSentenceFileInput" type="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json" hidden />
+      </div>
+      <p class="import-hint">txt, csv, json 파일 · 3줄마다 영어 문장, 뜻, 정답</p>
+      <div class="import-divider">또는 직접 입력</div>
+      <form class="sentence-form" id="addSentenceForm">
+        <label for="newSentenceEnglish">영어 문장</label>
+        <textarea id="newSentenceEnglish" class="sentence-input" name="english" placeholder="예: I [am] a student." required></textarea>
+        <p class="import-hint">대괄호 [] 안의 내용은 문장 문제를 풀 때 보이지 않습니다.</p>
+        <div class="modal-field-gap"></div>
+        <label for="newSentenceMeaning">뜻</label>
+        <input id="newSentenceMeaning" name="meaning" placeholder="예: 나는 학생이다" required />
+        <div class="modal-field-gap"></div>
+        <label for="newSentenceAnswer">정답</label>
+        <input id="newSentenceAnswer" name="answer" placeholder="예: am" required />
+        <div class="modal-actions">
+          <button type="button" class="btn secondary" id="cancelAddSentence">취소</button>
+          <button type="submit" class="btn">추가</button>
+        </div>
+      </form>
+    `,
+  );
+
+  document.getElementById("newSentenceEnglish").focus();
+  document.getElementById("cancelAddSentence").addEventListener("click", closeModal);
+  document.getElementById("importSentenceFileBtn").addEventListener("click", () => {
+    document.getElementById("importSentenceFileInput").click();
+  });
+  document.getElementById("importSentenceFileInput").addEventListener("change", handleSentenceFile);
+  document.getElementById("addSentenceForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const english = event.target.english.value.trim();
+    const meaning = event.target.meaning.value.trim();
+    const answer = event.target.answer.value.trim();
+    if (sentencesInGroup(sentenceGroup).some((item) => item.english.toLowerCase() === english.toLowerCase())) {
+      alert("이 그룹에 이미 등록된 문장입니다.");
+      return;
+    }
+    sentences.unshift(createSentence(english, meaning, answer, sentenceGroup));
+    await persistSentences();
+    closeModal();
+    drawSentenceTable(document.getElementById("sentenceSearch").value);
+  });
+}
+
+function handleSentenceFile(event) {
+  const input = event.target;
+  const file = input.files && input.files[0];
+  input.value = "";
+  if (!file) return;
+
+  const ext = file.name.includes(".") ? file.name.split(".").pop().toLowerCase() : "";
+  if (ext && !["txt", "csv", "json"].includes(ext)) {
+    alert("txt, csv, json 파일만 추가할 수 있습니다.");
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onerror = () => {
+    alert("선택한 파일을 열 수 없습니다.");
+  };
+  reader.onload = () => {
+    try {
+      const parsed = parseSentenceFile(file.name, String(reader.result || ""));
+      applyImportedSentences(parsed.records, parsed.invalid);
+    } catch (error) {
+      alert(error.message || "선택한 파일을 열 수 없습니다.");
+    }
+  };
+
+  try {
+    reader.readAsText(file, "UTF-8");
+  } catch {
+    alert("선택한 파일을 열 수 없습니다.");
+  }
+}
+
+function parseSentenceFile(filename, text) {
+  const content = String(text || "").replace(/^\uFEFF/, "");
+  if (!content.trim()) throw new Error("파일 내용이 비어 있어 문장을 추가할 수 없습니다.");
+
+  const ext = filename.includes(".") ? filename.split(".").pop().toLowerCase() : "";
+  const parsed = ext === "json" ? parseJsonSentences(content) : parseTripleLineSentences(content);
+  if (!parsed.records.length && !parsed.invalid) {
+    throw new Error("파일에서 추가할 문장을 찾지 못했습니다.");
+  }
+  return parsed;
+}
+
+function parseJsonSentences(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return parseTripleLineSentences(text);
+  }
+  return jsonDataToSentences(data);
+}
+
+function jsonDataToSentences(data) {
+  if (typeof data === "string") return parseTripleLineSentences(data);
+  if (Array.isArray(data)) {
+    if (!data.length) return { records: [], invalid: 0 };
+    if (data.every((item) => item == null || typeof item === "string")) {
+      return recordsFromTripleLines(
+        data.map((item) => String(item ?? "").trim()).filter((line) => line && !line.startsWith("#")),
+      );
+    }
+    const records = [];
+    let invalid = 0;
+    for (const item of data) {
+      const record = jsonItemToSentence(item);
+      if (record) records.push(record);
+      else invalid += 1;
+    }
+    return { records, invalid };
+  }
+  if (data && typeof data === "object") {
+    const list = data.sentences || data.items || data.문장;
+    if (Array.isArray(list)) return jsonDataToSentences(list);
+    const one = jsonItemToSentence(data);
+    return one ? { records: [one], invalid: 0 } : { records: [], invalid: 1 };
+  }
+  return { records: [], invalid: 0 };
+}
+
+function jsonItemToSentence(item) {
+  if (typeof item === "string") {
+    const lines = item.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    return toSentenceRecord(lines[0], lines[1], lines[2]);
+  }
+  if (Array.isArray(item)) return toSentenceRecord(item[0], item[1], item[2]);
+  if (!item || typeof item !== "object") return null;
+  const block = pickField(item, ["line", "text", "내용"]);
+  if (block && block.includes("\n")) {
+    const lines = block.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    return toSentenceRecord(lines[0], lines[1], lines[2]);
+  }
+  return toSentenceRecord(
+    pickField(item, ["english", "sentence", "문장", "영어 문장", "eng_sentence", "en"]),
+    pickField(item, ["meaning", "뜻", "kor_mean", "definition"]),
+    pickField(item, ["answer", "정답", "correct"]),
+  );
+}
+
+function parseTripleLineSentences(text) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+  return recordsFromTripleLines(lines);
+}
+
+function recordsFromTripleLines(lines) {
+  const records = [];
+  let invalid = 0;
+  for (let i = 0; i < lines.length; i += 3) {
+    if (i + 2 >= lines.length) {
+      invalid += 1;
+      break;
+    }
+    const english = lines[i];
+    const meaning = lines[i + 1];
+    const answer = lines[i + 2];
+    if (isSentenceHeaderTriplet(english, meaning, answer)) continue;
+    const record = toSentenceRecord(english, meaning, answer);
+    if (record) records.push(record);
+    else invalid += 1;
+  }
+  return { records, invalid };
+}
+
+function isSentenceHeaderTriplet(english, meaning, answer) {
+  return (
+    /^(문장|sentence|english|영어|영어 문장)$/i.test(String(english || "").trim()) &&
+    /^(뜻|meaning|definition)$/i.test(String(meaning || "").trim()) &&
+    /^(정답|answer|correct)$/i.test(String(answer || "").trim())
+  );
+}
+
+function toSentenceRecord(english, meaning, answer) {
+  const sentence = String(english || "").trim();
+  const korean = String(meaning || "").trim();
+  const key = String(answer || "").trim() || sentenceBracketAnswers(sentence).join(", ");
+  if (!sentence || !korean || !key) return null;
+  return { english: sentence, meaning: korean, answer: key };
+}
+
+async function applyImportedSentences(imported, invalid = 0) {
+  const added = [];
+  let skipped = 0;
+
+  for (const item of imported) {
+    const exists = sentencesInGroup(sentenceGroup).some(
+      (sentence) => sentence.english.toLowerCase() === item.english.toLowerCase(),
+    );
+    const alreadyQueued = added.some((sentence) => sentence.english.toLowerCase() === item.english.toLowerCase());
+    if (exists || alreadyQueued) {
+      skipped += 1;
+      continue;
+    }
+    added.push(createSentence(item.english, item.meaning, item.answer, sentenceGroup));
+  }
+
+  if (!added.length) {
+    if (skipped) {
+      alert("이미 등록된 문장만 있어 추가되지 않았습니다.");
+    } else if (invalid) {
+      alert("문장, 뜻, 정답 구성이 맞지 않아 추가할 문장이 없습니다.");
+    } else {
+      alert("파일에서 추가할 문장을 찾지 못했습니다.");
+    }
+    return;
+  }
+
+  sentences = [...added, ...sentences];
+  await persistSentences();
+  sentencePage = 1;
+  closeModal();
+  drawSentenceTable(document.getElementById("sentenceSearch").value);
+  const extras = [];
+  if (skipped) extras.push(`중복 ${skipped}개`);
+  if (invalid) extras.push(`형식이 맞지 않는 ${invalid}개`);
+  alert(
+    extras.length
+      ? `${added.length}개 문장을 추가했습니다. ${extras.join(", ")}는 건너뛰었습니다.`
+      : `${added.length}개 문장을 추가했습니다.`,
+  );
+}
+
+function openEditSentenceModal(id) {
+  const item = sentences.find((sentence) => sentence.id === id);
+  if (!item) return;
+
+  openModal(
+    "문장 변경",
+    `
+      <form class="sentence-form" id="editSentenceForm">
+        <label for="editSentenceEnglish">영어 문장</label>
+        <textarea id="editSentenceEnglish" class="sentence-input" name="english" required>${escapeHtml(item.english)}</textarea>
+        <p class="import-hint">대괄호 [] 안의 내용은 문장 문제를 풀 때 보이지 않습니다.</p>
+        <div class="modal-field-gap"></div>
+        <label for="editSentenceMeaning">뜻</label>
+        <input id="editSentenceMeaning" name="meaning" value="${escapeHtml(item.meaning)}" required />
+        <div class="modal-field-gap"></div>
+        <label for="editSentenceAnswer">정답</label>
+        <input id="editSentenceAnswer" name="answer" value="${escapeHtml(item.answer)}" required />
+        <div class="modal-actions">
+          <button type="button" class="btn secondary" id="cancelEditSentence">취소</button>
+          <button type="submit" class="btn">저장</button>
+        </div>
+      </form>
+    `,
+  );
+
+  document.getElementById("cancelEditSentence").addEventListener("click", closeModal);
+  document.getElementById("editSentenceForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const english = event.target.english.value.trim();
+    const meaning = event.target.meaning.value.trim();
+    const answer = event.target.answer.value.trim();
+    const duplicated = sentences.some(
+      (sentence) =>
+        sentence.id !== id &&
+        sentence.group === item.group &&
+        sentence.english.toLowerCase() === english.toLowerCase(),
+    );
+    if (duplicated) {
+      alert("이 그룹에 이미 등록된 문장입니다.");
+      return;
+    }
+    item.english = english;
+    item.meaning = meaning;
+    item.answer = answer;
+    await persistSentences();
+    closeModal();
+    drawSentenceTable(document.getElementById("sentenceSearch").value);
+  });
+}
+
+async function deleteSentence(id) {
+  const item = sentences.find((sentence) => sentence.id === id);
+  if (!item) return;
+  if (!confirm("이 문장을 삭제할까요?")) return;
+  selectedSentenceIds.delete(id);
+  sentences = sentences.filter((sentence) => sentence.id !== id);
+  await persistSentences();
+  drawSentenceTable(document.getElementById("sentenceSearch").value);
+}
+
+function updateSentenceBulkDeleteButton() {
+  const button = document.getElementById("bulkDeleteBtn");
+  if (!button) return;
+  button.disabled = selectedSentenceIds.size === 0;
+  button.textContent = selectedSentenceIds.size ? `선택 삭제 (${selectedSentenceIds.size})` : "선택 삭제";
+}
+
+async function deleteSelectedSentences(keyword = "") {
+  const ids = [...selectedSentenceIds];
+  if (!ids.length) {
+    alert("삭제할 문장을 선택해 주세요.");
+    return;
+  }
+  if (!confirm(`선택한 문장 ${ids.length}개를 삭제할까요?`)) return;
+  sentences = sentences.filter((item) => !selectedSentenceIds.has(item.id));
+  selectedSentenceIds = new Set();
+  await persistSentences();
+  drawSentenceTable(keyword);
+}
+
+function settingsGroupFields(prefix, env, formatHint) {
+  return `
+    <div>
+      <label for="${prefix}QuizSize">시험 문항 수</label>
+      <select id="${prefix}QuizSize" name="${prefix}QuizSize">
+        ${QUIZ_SIZE_OPTIONS.map(
+          (size) => `<option value="${size}" ${size === env.quizSize ? "selected" : ""}>${size}문항</option>`,
+        ).join("")}
+      </select>
+    </div>
+    <div>
+      <label for="${prefix}QuizFormat">문제 형식</label>
+      <select id="${prefix}QuizFormat" name="${prefix}QuizFormat">
+        ${QUIZ_FORMAT_OPTIONS.map(
+          (format) => `<option value="${format}" ${format === env.quizFormat ? "selected" : ""}>${format}</option>`,
+        ).join("")}
+      </select>
+      <p class="settings-hint">${formatHint}</p>
+    </div>
+    <div>
+      <label for="${prefix}QuizMinutes">시험 시간 지정</label>
+      <input
+        id="${prefix}QuizMinutes"
+        name="${prefix}QuizMinutes"
+        type="number"
+        min="${MIN_QUIZ_MINUTES}"
+        max="${MAX_QUIZ_MINUTES}"
+        value="${env.quizMinutes}"
+        required
+      />
+      <p class="settings-hint">분 단위로 입력합니다. 기본값 10분, ${MIN_QUIZ_MINUTES}분부터 ${MAX_QUIZ_MINUTES}분까지 지정할 수 있습니다.</p>
+    </div>
+  `;
+}
+
+function readQuizEnvFromForm(form, prefix) {
+  return {
+    quizSize: Number(form[`${prefix}QuizSize`].value),
+    quizMinutes: Number(form[`${prefix}QuizMinutes`].value),
+    quizFormat: form[`${prefix}QuizFormat`].value,
+  };
+}
+
+function quizEnvError(env) {
+  if (!QUIZ_SIZE_OPTIONS.includes(env.quizSize)) return "시험 문항 수를 다시 선택해 주세요.";
+  if (!Number.isInteger(env.quizMinutes) || env.quizMinutes < MIN_QUIZ_MINUTES || env.quizMinutes > MAX_QUIZ_MINUTES) {
+    return `시험 시간은 ${MIN_QUIZ_MINUTES}분 이상 ${MAX_QUIZ_MINUTES}분 이하로 입력해 주세요.`;
+  }
+  if (!QUIZ_FORMAT_OPTIONS.includes(env.quizFormat)) return "문제 형식을 다시 선택해 주세요.";
+  return "";
 }
 
 function renderSettings() {
+  homeTab = "settings";
+  const word = wordQuizSettings();
+  const sentence = settings.sentence || defaultQuizEnv();
   updateHeader("환경 설정");
   app.innerHTML = `
-    <div class="toolbar">
-      <h1 class="section-title">환경 설정</h1>
-      <button class="btn secondary" id="backHome">홈으로</button>
-    </div>
+    ${homeTabsHtml()}
     <form class="settings-form" id="settingsForm">
-      <div>
-        <label for="quizSizeSelect">시험 문항 수</label>
-        <select id="quizSizeSelect" name="quizSize">
-          ${QUIZ_SIZE_OPTIONS.map(
-            (size) => `<option value="${size}" ${size === settings.quizSize ? "selected" : ""}>${size}문항</option>`,
-          ).join("")}
-        </select>
-      </div>
-      <div>
-        <label for="quizFormatSelect">문제 형식</label>
-        <select id="quizFormatSelect" name="quizFormat">
-          ${QUIZ_FORMAT_OPTIONS.map(
-            (format) => `<option value="${format}" ${format === settings.quizFormat ? "selected" : ""}>${format}</option>`,
-          ).join("")}
-        </select>
-        <p class="settings-hint">주관식은 뜻을 보고 영어 단어를 입력하고, 객관식은 영어 단어의 뜻을 5지선다에서 고릅니다.</p>
-      </div>
-      <div>
-        <label for="quizMinutesInput">시험 시간 지정</label>
-        <input
-          id="quizMinutesInput"
-          name="quizMinutes"
-          type="number"
-          min="${MIN_QUIZ_MINUTES}"
-          max="${MAX_QUIZ_MINUTES}"
-          value="${settings.quizMinutes}"
-          required
-        />
-        <p class="settings-hint">분 단위로 입력합니다. 기본값 10분, ${MIN_QUIZ_MINUTES}분부터 ${MAX_QUIZ_MINUTES}분까지 지정할 수 있습니다.</p>
-      </div>
+      <fieldset class="settings-group">
+        <legend>단어 시험 환경</legend>
+        ${settingsGroupFields(
+          "word",
+          word,
+          "주관식은 뜻을 보고 영어 단어를 입력하고, 객관식은 영어 단어의 뜻을 5지선다에서 고릅니다.",
+        )}
+      </fieldset>
+      <fieldset class="settings-group">
+        <legend>문장 시험 환경</legend>
+        ${settingsGroupFields(
+          "sentence",
+          sentence,
+          "주관식은 답을 직접 입력하고, 객관식은 5지선다에서 고릅니다.",
+        )}
+      </fieldset>
       <div class="modal-actions">
         <button type="submit" class="btn">저장</button>
       </div>
     </form>
   `;
 
-  document.getElementById("backHome").addEventListener("click", renderHome);
+  bindHomeTabs();
   document.getElementById("settingsForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const quizSize = Number(event.target.quizSize.value);
-    const quizMinutes = Number(event.target.quizMinutes.value);
-    const quizFormat = event.target.quizFormat.value;
-    if (!QUIZ_SIZE_OPTIONS.includes(quizSize)) {
-      alert("시험 문항 수를 다시 선택해 주세요.");
+    const wordEnv = readQuizEnvFromForm(event.target, "word");
+    const sentenceEnv = readQuizEnvFromForm(event.target, "sentence");
+    const error = quizEnvError(wordEnv) || quizEnvError(sentenceEnv);
+    if (error) {
+      alert(error);
       return;
     }
-    if (!Number.isInteger(quizMinutes) || quizMinutes < MIN_QUIZ_MINUTES || quizMinutes > MAX_QUIZ_MINUTES) {
-      alert(`시험 시간은 ${MIN_QUIZ_MINUTES}분 이상 ${MAX_QUIZ_MINUTES}분 이하로 입력해 주세요.`);
-      return;
-    }
-    if (!QUIZ_FORMAT_OPTIONS.includes(quizFormat)) {
-      alert("문제 형식을 다시 선택해 주세요.");
-      return;
-    }
-    settings = { quizSize, quizMinutes, quizFormat };
+    settings = { word: wordEnv, sentence: sentenceEnv };
     try {
       await saveSettingsToFirebase();
       alert("환경 설정을 저장했습니다.");
@@ -797,10 +1840,10 @@ function renderSettings() {
 }
 
 function renderQuizGroupPicker() {
-  updateHeader("시험 시작 · 그룹 선택");
+  updateHeader("단어 시험 시작 · 그룹 선택");
   app.innerHTML = `
     <div class="toolbar">
-      <h1 class="section-title">시험 시작</h1>
+      <h1 class="section-title">단어 시험 시작</h1>
       <button class="btn secondary" id="backHome">홈으로</button>
     </div>
     <p class="lede">시험을 볼 단어 그룹을 선택하세요.</p>
@@ -851,20 +1894,22 @@ function startQuiz(group = DEFAULT_WORD_GROUP) {
     return;
   }
 
+  const quizEnv = wordQuizSettings();
   const choicePool = isWrongQuiz && words.length > 1 ? words : pool;
   const questions = shuffle(pool)
-    .slice(0, Math.min(settings.quizSize, pool.length))
+    .slice(0, Math.min(quizEnv.quizSize, pool.length))
     .map((word) => ({
       ...word,
-      choices: settings.quizFormat === "객관식" ? buildChoiceOptions(word, choicePool) : null,
+      choices: quizEnv.quizFormat === "객관식" ? buildChoiceOptions(word, choicePool) : null,
     }));
   quiz = {
+    kind: "word",
     questions,
     index: 0,
     answers: [],
     startedAt: Date.now(),
-    timeLimitMs: settings.quizMinutes * 60 * 1000,
-    format: settings.quizFormat,
+    timeLimitMs: quizEnv.quizMinutes * 60 * 1000,
+    format: quizEnv.quizFormat,
     group: selectedGroup,
     hintLevel: 0,
   };
@@ -911,15 +1956,27 @@ function expireQuiz() {
   stopQuizTimer();
   while (quiz.answers.length < quiz.questions.length) {
     const current = quiz.questions[quiz.answers.length];
-    quiz.answers.push({
-      wordId: current.id,
-      english: current.english,
-      pos: current.pos || "",
-      meaning: current.meaning,
-      group: current.group || "",
-      userAnswer: "시간 초과",
-      correct: false,
-    });
+    quiz.answers.push(
+      quiz.kind === "sentence"
+        ? {
+            sentenceId: current.id,
+            english: current.english,
+            meaning: current.meaning,
+            answer: current.answer || "",
+            group: current.group || "",
+            userAnswer: "시간 초과",
+            correct: false,
+          }
+        : {
+            wordId: current.id,
+            english: current.english,
+            pos: current.pos || "",
+            meaning: current.meaning,
+            group: current.group || "",
+            userAnswer: "시간 초과",
+            correct: false,
+          },
+    );
   }
   alert("시험 시간이 종료되었습니다.");
   finishQuiz();
@@ -991,7 +2048,7 @@ function renderQuiz() {
   app.innerHTML = `
     <div class="toolbar">
       <div class="quiz-title-row">
-        <h1 class="section-title">시험 시작</h1>
+        <h1 class="section-title">단어 시험 시작</h1>
         <div class="quiz-times">
           <span class="quiz-total-time">총 시험 시간: ${formatElapsed(quiz.timeLimitMs)}</span>
           <span class="quiz-timer" id="quizTimer">시험 경과 시간: ${formatElapsedPrecise(Date.now() - quiz.startedAt)}</span>
@@ -1141,25 +2198,283 @@ async function finishQuiz() {
     duration: Math.max(0, Math.floor((Date.now() - currentQuiz.startedAt) / 1000)),
     total,
     correct,
-    group: currentQuiz.group || DEFAULT_WORD_GROUP,
+    group: currentQuiz.group,
     answers: currentQuiz.answers,
+    kind: currentQuiz.kind || "word",
   };
-  applyQuizStats(currentQuiz.answers, currentQuiz.group);
-  records.unshift(record);
   stopQuizTimer();
   quiz = null;
+  if (currentQuiz.kind === "sentence") {
+    homeTab = "sentence";
+    applySentenceQuizStats(currentQuiz.answers, currentQuiz.group);
+    sentenceRecords.unshift(record);
+    await persistSentencesAndExams();
+    renderSentenceResult(record, true);
+    return;
+  }
+  record.group = currentQuiz.group || DEFAULT_WORD_GROUP;
+  applyQuizStats(currentQuiz.answers, currentQuiz.group);
+  records.unshift(record);
   await persistExamsAndWords();
   renderResult(record, true);
+}
+
+function renderSentenceResult(record, justFinished) {
+  const percent = Math.round((record.correct / record.total) * 100);
+  const wrongCount = record.total - record.correct;
+  homeTab = "sentence";
+  updateHeader(justFinished ? "시험 완료" : "문장 시험 기록 상세");
+
+  app.innerHTML = `
+    <div class="toolbar">
+      <h1 class="section-title">${justFinished ? "시험 결과표" : "문장 시험 기록 상세"}</h1>
+      <div class="actions">
+        ${justFinished ? '<button class="btn" id="retryBtn">다시 시험</button>' : ""}
+        <button class="btn secondary" id="backBtn">${justFinished ? "홈으로" : "목록으로"}</button>
+      </div>
+    </div>
+    <div class="scoreboard">
+      <div class="score-circle">
+        <div>
+          <span class="score-label">점수</span>
+          <strong>${percent}</strong>
+          <span>${record.correct} / ${record.total}</span>
+        </div>
+      </div>
+      <div class="result-card">
+        <p class="lede">${formatDate(record.date)}에 치른 시험입니다. 입력한 답과 정답을 비교해 보세요.</p>
+        <p>문장 그룹 · ${escapeHtml(record.group || DEFAULT_SENTENCE_GROUP)}</p>
+        <p>소요 시간 · ${formatElapsed((Number(record.duration) || 0) * 1000)}</p>
+        <p>
+          <button type="button" class="result-count-btn ok" data-answer-list="correct">정답 ${record.correct}개</button>
+          ·
+          <button type="button" class="result-count-btn ng" data-answer-list="wrong">오답 ${wrongCount}개</button>
+        </p>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>번호</th>
+            <th>문장</th>
+            <th>뜻</th>
+            <th>정답</th>
+            <th>입력한 답</th>
+            <th>결과</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${record.answers
+            .map(
+              (item, index) => `
+                <tr>
+                  <td>${index + 1}</td>
+                  <td class="sentence-text${item.correct ? "" : " wrong-emphasis"}">${escapeHtml(item.english)}</td>
+                  <td${item.correct ? "" : ' class="wrong-emphasis"'}>${escapeHtml(item.meaning)}</td>
+                  <td>${escapeHtml(item.answer || "-")}</td>
+                  <td>${escapeHtml(item.userAnswer || "-")}</td>
+                  <td><span class="badge ${item.correct ? "ok" : "ng"}">${item.correct ? "정답" : "오답"}</span></td>
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  document.getElementById("backBtn").addEventListener("click", () => {
+    if (justFinished) renderHome();
+    else renderSentenceRecords();
+  });
+
+  document.querySelectorAll("[data-answer-list]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openSentenceAnswerListModal(record, button.dataset.answerList === "correct");
+    });
+  });
+
+  const retryBtn = document.getElementById("retryBtn");
+  if (retryBtn) retryBtn.addEventListener("click", () => startSentenceQuiz(record.group));
+}
+
+function openSentenceAnswerListModal(record, correctOnly) {
+  const items = (record.answers || []).filter((item) => Boolean(item.correct) === correctOnly);
+  const label = correctOnly ? "정답" : "오답";
+  const listHtml =
+    items.length === 0
+      ? `<div class="empty-state">${label} 문장이 없습니다.</div>`
+      : `
+        <div class="table-wrap answer-list-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="col-num">번호</th>
+                <th>문장</th>
+                <th>뜻</th>
+                <th>정답</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items
+                .map(
+                  (item, index) => `
+                    <tr>
+                      <td class="col-num">${index + 1}</td>
+                      <td class="sentence-text">${escapeHtml(item.english)}</td>
+                      <td>${escapeHtml(item.meaning)}</td>
+                      <td>${escapeHtml(item.answer || "-")}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+  openModal(
+    `${label} 문장 · ${items.length}개`,
+    `
+      ${listHtml}
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" id="closeAnswerList">닫기</button>
+      </div>
+    `,
+  );
+  document.getElementById("closeAnswerList").addEventListener("click", closeModal);
+}
+
+function collectWrongSentences() {
+  const seen = new Set();
+  const items = [];
+  for (const record of sentenceRecords) {
+    for (const answer of record.answers || []) {
+      if (answer.correct) continue;
+      const english = String(answer.english || "").trim();
+      if (!english) continue;
+      const group = resolveSentenceGroup(answer.group || record.group);
+      const key = `${group}::${english.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({
+        english,
+        meaning: answer.meaning || "",
+        answer: answer.answer || "",
+        group,
+      });
+    }
+  }
+  return items.sort((a, b) => a.english.localeCompare(b.english, "en", { sensitivity: "base" }));
+}
+
+function openAllWrongSentencesModal() {
+  const items = collectWrongSentences();
+  const listHtml =
+    items.length === 0
+      ? `<div class="empty-state">전체 시험에서 오답인 문장이 없습니다.</div>`
+      : `
+        <div class="table-wrap answer-list-wrap wrong-note-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="col-num">번호</th>
+                <th>문장</th>
+                <th>뜻</th>
+                <th>정답</th>
+                <th>문장 그룹</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items
+                .map(
+                  (item, index) => `
+                    <tr>
+                      <td class="col-num">${index + 1}</td>
+                      <td class="sentence-text">${escapeHtml(item.english)}</td>
+                      <td>${escapeHtml(item.meaning)}</td>
+                      <td>${escapeHtml(item.answer || "-")}</td>
+                      <td>${escapeHtml(item.group)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+  openModal(
+    `오답 노트 · ${items.length}개`,
+    `
+      ${listHtml}
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" id="closeAnswerList">닫기</button>
+      </div>
+    `,
+  );
+  document.getElementById("closeAnswerList").addEventListener("click", closeModal);
+}
+
+function renderSentenceRecords() {
+  homeTab = "sentence";
+  updateHeader(`문장 시험 기록 · ${sentenceRecords.length}건`);
+  app.innerHTML = `
+    <div class="toolbar">
+      <h1 class="section-title">문장 시험 기록 조회</h1>
+      <div class="actions">
+        <button class="btn" id="openWrongSentences">오답 노트</button>
+        <button class="btn secondary" id="backHome">홈으로</button>
+      </div>
+    </div>
+    <div id="sentenceRecordList"></div>
+  `;
+
+  document.getElementById("backHome").addEventListener("click", renderHome);
+  document.getElementById("openWrongSentences").addEventListener("click", openAllWrongSentencesModal);
+  const list = document.getElementById("sentenceRecordList");
+
+  if (sentenceRecords.length === 0) {
+    list.innerHTML = `<div class="empty-state">아직 저장된 문장 시험 기록이 없습니다.</div>`;
+    return;
+  }
+
+  list.innerHTML = `
+    <div class="history-list">
+      ${sentenceRecords
+        .map((record) => {
+          const percent = Math.round((record.correct / record.total) * 100);
+          return `
+            <article class="history-card">
+              <div>
+                <h3>${percent}점 · ${record.correct}/${record.total}</h3>
+                <p>${formatDate(record.date)} · ${escapeHtml(record.group || DEFAULT_SENTENCE_GROUP)} · ${record.total}문항 · ${formatElapsed((Number(record.duration) || 0) * 1000)}</p>
+              </div>
+              <button class="btn secondary" data-record="${record.id}">상세 보기</button>
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+
+  list.querySelectorAll("[data-record]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const record = sentenceRecords.find((item) => item.id === button.dataset.record);
+      if (record) renderSentenceResult(record, false);
+    });
+  });
 }
 
 function renderResult(record, justFinished) {
   const percent = Math.round((record.correct / record.total) * 100);
   const wrongCount = record.total - record.correct;
-  updateHeader(justFinished ? "시험 완료" : "시험 기록 상세");
+  updateHeader(justFinished ? "시험 완료" : "단어 시험 기록 상세");
 
   app.innerHTML = `
     <div class="toolbar">
-      <h1 class="section-title">${justFinished ? "시험 결과표" : "기록 상세"}</h1>
+      <h1 class="section-title">${justFinished ? "시험 결과표" : "단어 시험 기록 상세"}</h1>
       <div class="actions">
         ${justFinished ? '<button class="btn" id="retryBtn">다시 시험</button>' : ""}
         <button class="btn secondary" id="backBtn">${justFinished ? "홈으로" : "목록으로"}</button>
@@ -1837,10 +3152,10 @@ function openAllWrongWordsModal() {
 }
 
 function renderRecords() {
-  updateHeader(`시험 기록 · ${records.length}건`);
+  updateHeader(`단어 시험 기록 · ${records.length}건`);
   app.innerHTML = `
     <div class="toolbar">
-      <h1 class="section-title">시험 기록 조회</h1>
+      <h1 class="section-title">단어 시험 기록 조회</h1>
       <div class="actions">
         <button class="btn" id="openWrongWords">오답 노트</button>
         <button class="btn secondary" id="backHome">홈으로</button>
