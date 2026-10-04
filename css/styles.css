@@ -838,10 +838,32 @@ th {
   line-height: 1.55;
 }
 
+.col-sentence span {
+  display: block;
+}
+
+.col-sentence span + span {
+  margin-top: 2px;
+}
+
+.sentence-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
 .sentence-text {
-  max-width: 320px;
+  max-width: 480px;
   white-space: normal;
   word-break: break-word;
+}
+
+.sentence-meaning {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: keep-all;
 }
 
 .wrong-note-wrap {

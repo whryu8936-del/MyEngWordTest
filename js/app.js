@@ -1069,6 +1069,10 @@ function renderSentenceView(view) {
   renderSentenceRecords();
 }
 
+function displaySentenceText(english) {
+  return String(english || "").replace(/[\[\]]/g, "");
+}
+
 function sentenceBlankAnswers(english, fallbackAnswer = "") {
   const blanks = [...String(english || "").matchAll(/\[([^\]]*)\]/g)].map((match) => match[1]);
   if (blanks.length) return blanks;
@@ -1434,8 +1438,10 @@ function drawSentenceTable(keyword) {
         <thead>
           <tr>
             <th class="col-num">번호</th>
-            <th>문장</th>
-            <th>뜻</th>
+            <th class="col-sentence">
+              <span>문장</span>
+              <span>뜻</span>
+            </th>
             <th>정답</th>
             <th>정답율</th>
             <th class="col-manage">
@@ -1454,8 +1460,12 @@ function drawSentenceTable(keyword) {
               (item, index) => `
                 <tr>
                   <td class="col-num">${start + index + 1}</td>
-                  <td class="sentence-text">${escapeHtml(item.english)}</td>
-                  <td>${escapeHtml(item.meaning)}</td>
+                  <td>
+                    <div class="sentence-stack">
+                      <div class="sentence-text">${escapeHtml(displaySentenceText(item.english))}</div>
+                      <div class="sentence-meaning">${escapeHtml(item.meaning)}</div>
+                    </div>
+                  </td>
                   <td>${escapeHtml(item.answer)}</td>
                   <td class="col-rate">${formatAccuracy(item)}</td>
                   <td>
