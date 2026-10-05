@@ -1,0 +1,24 @@
+{
+  "rules": {
+    "word_list": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "exam_list": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "conf-env": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "sentence_list": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "sentence_exam_list": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
+  }
+}

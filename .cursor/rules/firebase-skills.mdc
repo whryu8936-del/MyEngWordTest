@@ -1,0 +1,16 @@
+---
+description: Always use official Firebase agent skills first for Firebase work
+alwaysApply: true
+---
+
+# Firebase Agent Skills
+
+When the task involves Firebase (Auth, Realtime Database, Security Rules, Hosting, CLI, MCP, or project config):
+
+1. Read and follow the matching official skill in `.agents/skills/` before changing code or rules.
+   - CLI, login, project selection: `firebase-basics`
+   - Sign-in and auth-based access: `firebase-auth-basics`
+   - Reviewing rules: `firebase-security-rules-auditor`
+2. Prefer Firebase MCP tools (`plugin-firebase-firebase`) over ad-hoc API calls.
+3. Run CLI commands as `npx -y firebase-tools@latest ...`. Do not use a bare `firebase` command.
+4. For Firebase product knowledge, search with `developerknowledge_search_documents` before general web search.
