@@ -19,6 +19,14 @@
     "sentence_exam_list": {
       ".read": "auth != null",
       ".write": "auth != null"
+    },
+    "writing_list": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "writing_exam_list": {
+      ".read": "auth != null",
+      ".write": "auth != null"
     }
   }
 }

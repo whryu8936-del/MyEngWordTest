@@ -137,7 +137,7 @@ main {
   margin: 0 0 28px;
   padding: 6px;
   background: #efe7d8;
-  border-radius: 999px;
+  border-radius: 20px;
 }
 
 .home-tab {
@@ -145,9 +145,9 @@ main {
   background: transparent;
   color: var(--muted);
   font-family: inherit;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
-  padding: 10px 16px;
+  padding: 8px 12px;
   border-radius: 999px;
   cursor: pointer;
 }
@@ -710,6 +710,59 @@ th {
   align-items: end;
 }
 
+.writing-answer-row {
+  grid-template-columns: 1fr;
+}
+
+.writing-answer-row textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.writing-grade {
+  margin-top: 20px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fffdf8;
+}
+
+.writing-grade p {
+  margin: 0 0 10px;
+}
+
+.writing-errors {
+  margin: 0 0 12px;
+  padding-left: 18px;
+}
+
+.writing-errors li {
+  margin-bottom: 10px;
+}
+
+.writing-verdict-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.writing-detail-btn {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.writing-grade-modal {
+  margin-top: 0;
+  max-height: min(65vh, 560px);
+  overflow: auto;
+}
+
+.modal:has(.writing-grade-modal) {
+  width: min(640px, 100%);
+}
+
 .choice-list {
   display: grid;
   gap: 10px;
@@ -939,6 +992,22 @@ th {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.file-picker-wrap {
+  position: relative;
+  display: inline-flex;
+  overflow: hidden;
+}
+
+.file-picker-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 0;
 }
 
 .import-hint {
