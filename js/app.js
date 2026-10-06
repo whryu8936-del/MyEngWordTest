@@ -1320,6 +1320,7 @@ function renderWritingHome() {
         <span class="menu-index">01</span>
         <h2>영어 작문 시험 시작</h2>
         <p>작문 그룹을 고른 뒤 ${writingEnv.quizSize}문항 · ${writingEnv.quizMinutes}분 작문 시험을 시작합니다.</p>
+        <p class="menu-card-note">작문 시험은 로컬 PC 환경에서만 동작됩니다.</p>
       </button>
       <button class="menu-card" data-view="writing-manage">
         <span class="menu-index">02</span>
