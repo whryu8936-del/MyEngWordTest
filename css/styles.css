@@ -222,6 +222,10 @@ main {
   line-height: 1.6;
 }
 
+.menu-card-note {
+  margin-top: 10px;
+}
+
 .stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
