@@ -551,6 +551,14 @@ th {
   gap: 12px;
 }
 
+.manage-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .word-check {
   width: 18px;
   height: 18px;

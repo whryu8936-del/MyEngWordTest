@@ -1090,6 +1090,38 @@ function formatAccuracy(word) {
   return `<span class="rate">${percent}% <span class="rate-frac">(${correct}/${asked})</span></span>`;
 }
 
+function manageHeadHtml(selectedCount) {
+  return `
+    <div class="manage-head">
+      <span>관리</span>
+      <div class="manage-head-actions">
+        <button type="button" class="icon-btn" id="selectPageAllBtn">전체 선택</button>
+        <button type="button" class="icon-btn" id="clearPageAllBtn">전체 선택 취소</button>
+        <button type="button" class="icon-btn" id="bulkDeleteBtn" ${selectedCount === 0 ? "disabled" : ""}>
+          선택 삭제${selectedCount ? ` (${selectedCount})` : ""}
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function bindPageSelection(selectedSet, updateButton) {
+  document.getElementById("selectPageAllBtn")?.addEventListener("click", () => {
+    document.querySelectorAll("[data-select]").forEach((checkbox) => {
+      checkbox.checked = true;
+      selectedSet.add(checkbox.dataset.select);
+    });
+    updateButton();
+  });
+  document.getElementById("clearPageAllBtn")?.addEventListener("click", () => {
+    document.querySelectorAll("[data-select]").forEach((checkbox) => {
+      checkbox.checked = false;
+      selectedSet.delete(checkbox.dataset.select);
+    });
+    updateButton();
+  });
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -2038,12 +2070,7 @@ function drawWritingTable(keyword) {
             <th>AI 작문 결과</th>
             <th>정답율</th>
             <th class="col-manage">
-              <div class="manage-head">
-                <span>관리</span>
-                <button type="button" class="icon-btn" id="bulkDeleteBtn" ${selectedWritingIds.size === 0 ? "disabled" : ""}>
-                  선택 삭제${selectedWritingIds.size ? ` (${selectedWritingIds.size})` : ""}
-                </button>
-              </div>
+              ${manageHeadHtml(selectedWritingIds.size)}
             </th>
           </tr>
         </thead>
@@ -2099,6 +2126,7 @@ function drawWritingTable(keyword) {
       updateWritingBulkDeleteButton();
     });
   });
+  bindPageSelection(selectedWritingIds, updateWritingBulkDeleteButton);
   document.getElementById("bulkDeleteBtn")?.addEventListener("click", () => deleteSelectedWritings(keyword));
   target.querySelectorAll("[data-page]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2801,12 +2829,7 @@ function drawSentenceTable(keyword) {
             <th>정답</th>
             <th>정답율</th>
             <th class="col-manage">
-              <div class="manage-head">
-                <span>관리</span>
-                <button type="button" class="icon-btn" id="bulkDeleteBtn" ${selectedSentenceIds.size === 0 ? "disabled" : ""}>
-                  선택 삭제${selectedSentenceIds.size ? ` (${selectedSentenceIds.size})` : ""}
-                </button>
-              </div>
+              ${manageHeadHtml(selectedSentenceIds.size)}
             </th>
           </tr>
         </thead>
@@ -2866,6 +2889,7 @@ function drawSentenceTable(keyword) {
       updateSentenceBulkDeleteButton();
     });
   });
+  bindPageSelection(selectedSentenceIds, updateSentenceBulkDeleteButton);
   document.getElementById("bulkDeleteBtn")?.addEventListener("click", () => deleteSelectedSentences(keyword));
   target.querySelectorAll("[data-page]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -4268,12 +4292,7 @@ function drawWordTable(keyword) {
             <th>뜻</th>
             <th>정답율</th>
             <th class="col-manage">
-              <div class="manage-head">
-                <span>관리</span>
-                <button type="button" class="icon-btn" id="bulkDeleteBtn" ${selectedWordIds.size === 0 ? "disabled" : ""}>
-                  선택 삭제${selectedWordIds.size ? ` (${selectedWordIds.size})` : ""}
-                </button>
-              </div>
+              ${manageHeadHtml(selectedWordIds.size)}
             </th>
           </tr>
         </thead>
@@ -4329,6 +4348,7 @@ function drawWordTable(keyword) {
       updateBulkDeleteButton();
     });
   });
+  bindPageSelection(selectedWordIds, updateBulkDeleteButton);
   document.getElementById("bulkDeleteBtn")?.addEventListener("click", () => deleteSelectedWords(keyword));
   target.querySelectorAll("[data-page]").forEach((button) => {
     button.addEventListener("click", () => {
