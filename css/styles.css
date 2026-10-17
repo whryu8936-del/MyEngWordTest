@@ -527,6 +527,7 @@ th {
   color: var(--muted);
   font-size: 13px;
   font-weight: 500;
+  vertical-align: middle;
 }
 
 .col-num {
@@ -555,7 +556,7 @@ th {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
 }
 
