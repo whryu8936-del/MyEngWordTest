@@ -545,19 +545,15 @@ th {
   white-space: nowrap;
 }
 
-.manage-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.manage-head-actions {
+.manage-toolbar {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   flex-wrap: nowrap;
   gap: 6px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
 }
 
 .word-check {
