@@ -1090,17 +1090,14 @@ function formatAccuracy(word) {
   return `<span class="rate">${percent}% <span class="rate-frac">(${correct}/${asked})</span></span>`;
 }
 
-function manageHeadHtml(selectedCount) {
+function manageToolbarHtml(selectedCount) {
   return `
-    <div class="manage-head">
-      <span>관리</span>
-      <div class="manage-head-actions">
-        <button type="button" class="icon-btn" id="selectPageAllBtn">전체 선택</button>
-        <button type="button" class="icon-btn" id="clearPageAllBtn">전체 선택 취소</button>
-        <button type="button" class="icon-btn" id="bulkDeleteBtn" ${selectedCount === 0 ? "disabled" : ""}>
-          선택 삭제${selectedCount ? ` (${selectedCount})` : ""}
-        </button>
-      </div>
+    <div class="manage-toolbar">
+      <button type="button" class="icon-btn" id="selectPageAllBtn">전체 선택</button>
+      <button type="button" class="icon-btn" id="clearPageAllBtn">전체 선택 취소</button>
+      <button type="button" class="icon-btn" id="bulkDeleteBtn" ${selectedCount === 0 ? "disabled" : ""}>
+        선택 삭제${selectedCount ? ` (${selectedCount})` : ""}
+      </button>
     </div>
   `;
 }
@@ -2061,6 +2058,7 @@ function drawWritingTable(keyword) {
 
   target.innerHTML = `
     <div class="table-wrap">
+      ${manageToolbarHtml(selectedWritingIds.size)}
       <table>
         <thead>
           <tr>
@@ -2069,9 +2067,7 @@ function drawWritingTable(keyword) {
             <th>표준 영어 작문</th>
             <th>AI 작문 결과</th>
             <th>정답율</th>
-            <th class="col-manage">
-              ${manageHeadHtml(selectedWritingIds.size)}
-            </th>
+            <th class="col-manage">관리</th>
           </tr>
         </thead>
         <tbody>
@@ -2818,6 +2814,7 @@ function drawSentenceTable(keyword) {
 
   target.innerHTML = `
     <div class="table-wrap">
+      ${manageToolbarHtml(selectedSentenceIds.size)}
       <table>
         <thead>
           <tr>
@@ -2828,9 +2825,7 @@ function drawSentenceTable(keyword) {
             </th>
             <th>정답</th>
             <th>정답율</th>
-            <th class="col-manage">
-              ${manageHeadHtml(selectedSentenceIds.size)}
-            </th>
+            <th class="col-manage">관리</th>
           </tr>
         </thead>
         <tbody>
@@ -4283,6 +4278,7 @@ function drawWordTable(keyword) {
 
   target.innerHTML = `
     <div class="table-wrap">
+      ${manageToolbarHtml(selectedWordIds.size)}
       <table>
         <thead>
           <tr>
@@ -4291,9 +4287,7 @@ function drawWordTable(keyword) {
             <th>품사</th>
             <th>뜻</th>
             <th>정답율</th>
-            <th class="col-manage">
-              ${manageHeadHtml(selectedWordIds.size)}
-            </th>
+            <th class="col-manage">관리</th>
           </tr>
         </thead>
         <tbody>
